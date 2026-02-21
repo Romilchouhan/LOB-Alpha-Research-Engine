@@ -121,28 +121,37 @@ python scripts/preprocess.py \
 ./build/lob_engine --file data/lob.bin --hazelcast
 ```
 
-### CLI Options
-
-| Flag              | Description                                  | Default   |
-|-------------------|----------------------------------------------|-----------|
-| `--csv <path>`    | Load FI-2010 CSV file                        | —         |
-| `--file <path>`   | Load pre-processed binary file               | —         |
-| `--synthetic`     | Generate 500-tick synthetic LOB              | —         |
-| `--hazelcast`     | Enable Hazelcast distributed store           | off       |
-| `--plot`          | Show Matplotplusplus charts                  | off       |
-| `--spread-offset` | Micro-Price threshold offset                 | 0.0001    |
-| `--vpin-bucket`   | VPIN bucket volume                           | 1000      |
-| `--vpin-window`   | VPIN rolling window (# buckets)              | 50        |
-
 ---
 
-## Research Output
+## Visualizations
 
-The engine prints three research blocks to stdout:
+The engine can export tick-by-tick data to CSV for high-quality plotting using the included Python script. 
 
-1. **Execution Summary** — tick count, throughput, trade stats, PnL
-2. **RMSE Table** — Micro-Price predictive accuracy at 10 / 50 / 100 tick horizons
-3. **VPIN Summary** — distribution statistics + toxicity threshold
+### Synthetic Data (Test)
+Used for smoke-testing and validating algorithm logic without requiring external files.
+- **Location**: `plots/synthetic/`
+- **Generate**: 
+  ```bash
+  ./build/lob_engine --synthetic --synthetic-n 2000 --dump-csv data/results.csv
+  python3 scripts/visualize.py --input data/results.csv --output plots/synthetic/ --dark
+  ```
+
+### Real Data (FI-2010)
+Actual research results from the benchmark dataset.
+- **Location**: `plots/fi2010/`
+- **Generate**: 
+  ```bash
+  python3 scripts/preprocess.py --input data/FI-2010.csv --output data/lob.bin
+  ./build/lob_engine --file data/lob.bin --dump-csv data/fi2010_results.csv
+  python3 scripts/visualize.py --input data/fi2010_results.csv --output plots/fi2010/ --dark
+  ```
+
+| Plot Type | Description |
+|-----------|-------------|
+| **Dashboard** | 4-panel overview (Price, OBI, PnL, VPIN) |
+| **Micro-vs-Mid** | Stoikov estimator vs standard mid-price |
+| **PnL Curve** | Strategy returns with toxicity abort markers |
+| **VPIN** | Real-time toxic flow detection |
 
 ---
 
@@ -150,32 +159,36 @@ The engine prints three research blocks to stdout:
 
 ```
 Micro-Price-LOB/
-├── CMakeLists.txt
-├── README.md
+├── CMakeLists.txt           # Build system (C++20, Apple M2)
+├── README.md                # Research engine overview
+├── plots/                   # Stored visualizations (Synthetic & FI-2010)
+│   ├── synthetic/           # Test run charts
+│   └── fi2010/              # Research benchmark charts
 ├── include/
 │   ├── features/
-│   │   ├── micro_price.hpp      # Stoikov Micro-Price
-│   │   ├── obi.hpp              # Order Book Imbalance
-│   │   └── vpin.hpp             # VPIN toxic flow detector
+│   │   ├── micro_price.hpp   # Stoikov estimator
+│   │   ├── obi.hpp           # Order Book Imbalance
+│   │   └── vpin.hpp          # VPIN monitor
 │   ├── infra/
-│   │   └── hazelcast_store.hpp  # Distributed store interface
+│   │   └── hazelcast_store.hpp
 │   ├── lob/
-│   │   ├── fi2010_parser.hpp    # CSV & binary parser
-│   │   ├── order_book.hpp       # LimitOrderBook class
-│   │   └── price_level.hpp      # PriceLevel struct
+│   │   ├── fi2010_parser.hpp # CSV/Binary engine
+│   │   ├── order_book.hpp    # LOB data container
+│   │   └── price_level.hpp
 │   ├── stats/
-│   │   └── rmse.hpp             # RMSE & statistics
+│   │   └── rmse.hpp          # Predictive accuracy
 │   └── trading/
-│       └── simulated_trader.hpp # Passive Fill + VPIN abort
+│       └── simulated_trader.hpp
 ├── scripts/
-│   └── preprocess.py            # FI-2010 → binary converter
+│   ├── preprocess.py        # FI-2010 data cleaner
+│   └── visualize.py         # Advanced plot generator
 └── src/
-    ├── fi2010_parser.cpp
-    ├── hazelcast_store.cpp
-    ├── main.cpp
-    ├── simulated_trader.cpp
-    ├── visualization.cpp
-    └── vpin.cpp
+    ├── fi2010_parser.cpp     # Data engine implementation
+    ├── hazelcast_store.cpp   # Distributed client logic
+    ├── main.cpp              # Orchestrator
+    ├── simulated_trader.cpp  # Strategy logic
+    ├── visualization.cpp     # C++ plotting wrappers
+    └── vpin.cpp              # Toxicity detector
 ```
 
 ---
@@ -201,10 +214,3 @@ VPIN = Σ|V_buy(n) − V_sell(n)| / (N × V_bucket)
 ```
 
 Volume classification uses the **tick rule** on mid-price direction.
-
----
-
-## License
-
-Research / educational use.  Not for production trading without
-appropriate risk management, compliance review, and regulatory approval.
