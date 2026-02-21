@@ -1,0 +1,305 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// LOB Alpha Research Engine — Main entry point
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Usage:
+//   lob_engine --file data/lob.bin            # pre-processed binary
+//   lob_engine --csv  data/fi2010.csv         # raw FI-2010 CSV
+//   lob_engine --synthetic                    # 500-tick synthetic book
+//   lob_engine --file data/lob.bin --hazelcast --plot
+// ─────────────────────────────────────────────────────────────────────────────
+
+#include "lob/fi2010_parser.hpp"
+#include "lob/order_book.hpp"
+#include "features/micro_price.hpp"
+#include "features/obi.hpp"
+#include "features/vpin.hpp"
+#include "stats/rmse.hpp"
+#include "trading/simulated_trader.hpp"
+#include "infra/hazelcast_store.hpp"
+
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <cstring>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <string>
+#include <vector>
+
+// Forward declarations from visualization.cpp
+namespace viz {
+void plot_pnl(const std::vector<double>&, const std::string&);
+void plot_micro_vs_mid(const std::vector<double>&, const std::vector<double>&,
+                       const std::string&);
+void plot_vpin(const std::vector<double>&, double, const std::string&);
+}
+
+// ── CLI argument parser ─────────────────────────────────────────────────────
+
+struct Args {
+    std::string csv_path;
+    std::string bin_path;
+    std::string dump_csv;        // --dump-csv <path>
+    bool        synthetic     = false;
+    bool        hazelcast     = false;
+    bool        plot          = false;
+    double      spread_offset = 0.0001;
+    double      vpin_bucket   = 1000.0;
+    std::size_t vpin_window   = 50;
+    std::size_t synthetic_n   = 500;
+};
+
+static Args parse_args(int argc, char* argv[]) {
+    Args a;
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--csv") == 0 && i + 1 < argc)
+            a.csv_path = argv[++i];
+        else if (std::strcmp(argv[i], "--file") == 0 && i + 1 < argc)
+            a.bin_path = argv[++i];
+        else if (std::strcmp(argv[i], "--synthetic") == 0)
+            a.synthetic = true;
+        else if (std::strcmp(argv[i], "--hazelcast") == 0)
+            a.hazelcast = true;
+        else if (std::strcmp(argv[i], "--plot") == 0)
+            a.plot = true;
+        else if (std::strcmp(argv[i], "--dump-csv") == 0 && i + 1 < argc)
+            a.dump_csv = argv[++i];
+        else if (std::strcmp(argv[i], "--spread-offset") == 0 && i + 1 < argc)
+            a.spread_offset = std::stod(argv[++i]);
+        else if (std::strcmp(argv[i], "--vpin-bucket") == 0 && i + 1 < argc)
+            a.vpin_bucket = std::stod(argv[++i]);
+        else if (std::strcmp(argv[i], "--vpin-window") == 0 && i + 1 < argc)
+            a.vpin_window = static_cast<std::size_t>(std::stoul(argv[++i]));
+        else if (std::strcmp(argv[i], "--synthetic-n") == 0 && i + 1 < argc)
+            a.synthetic_n = static_cast<std::size_t>(std::stoul(argv[++i]));
+        else if (std::strcmp(argv[i], "--help") == 0) {
+            std::cout <<
+                "LOB Alpha Research Engine — FI-2010\n\n"
+                "  --csv  <path>       Load FI-2010 CSV file\n"
+                "  --file <path>       Load pre-processed binary file\n"
+                "  --synthetic         Generate synthetic LOB data\n"
+                "  --synthetic-n <n>   Number of synthetic ticks (default 500)\n"
+                "  --dump-csv <path>   Export tick data to CSV for plotting\n"
+                "  --hazelcast         Enable Hazelcast distributed store\n"
+                "  --plot              Show Matplotplusplus charts (if compiled)\n"
+                "  --spread-offset <d> Micro-price spread offset (default 0.0001)\n"
+                "  --vpin-bucket <d>   VPIN bucket volume (default 1000)\n"
+                "  --vpin-window <n>   VPIN rolling window buckets (default 50)\n"
+                "  --help              Show this message\n";
+            std::exit(0);
+        }
+    }
+    return a;
+}
+
+// ── RMSE research task ──────────────────────────────────────────────────────
+
+static void run_rmse_analysis(const std::vector<double>& micro_series,
+                              const std::vector<double>& mid_series,
+                              const std::vector<int>& horizons) {
+    std::cout << "\n╔══════════════════════════════════════════════════╗\n";
+    std::cout << "║  Micro-Price Predictive Accuracy (RMSE)         ║\n";
+    std::cout << "╠══════════════════════════════════════════════════╣\n";
+    std::cout << "║  Horizon (ticks)  │  RMSE              ║\n";
+    std::cout << "╠═══════════════════╪═════════════════════╣\n";
+
+    for (int h : horizons) {
+        if (static_cast<std::size_t>(h) >= mid_series.size()) {
+            std::cout << "║  " << std::setw(16) << h
+                      << " │  (insufficient data)      ║\n";
+            continue;
+        }
+
+        // predicted[t] = micro_series[t]
+        // actual[t]    = mid_series[t + h]
+        const std::size_t n = mid_series.size() - static_cast<std::size_t>(h);
+        std::vector<double> predicted(micro_series.begin(),
+                                      micro_series.begin() + static_cast<long>(n));
+        std::vector<double> actual(mid_series.begin() + h,
+                                   mid_series.end());
+
+        const double r = stats::rmse(predicted, actual);
+        std::cout << "║  " << std::setw(16) << h
+                  << " │  " << std::setw(18) << std::fixed
+                  << std::setprecision(8) << r << " ║\n";
+    }
+    std::cout << "╚═══════════════════╧═════════════════════╝\n";
+}
+
+// ── Main ────────────────────────────────────────────────────────────────────
+
+int main(int argc, char* argv[]) {
+    const auto args = parse_args(argc, argv);
+
+    // ── 1. Load data ────────────────────────────────────────────────────
+    std::vector<lob::LOBSnapshot> snapshots;
+
+    auto t0 = std::chrono::high_resolution_clock::now();
+
+    if (!args.bin_path.empty()) {
+        snapshots = lob::read_binary(args.bin_path);
+    } else if (!args.csv_path.empty()) {
+        snapshots = lob::parse_fi2010_csv(args.csv_path);
+    } else {
+        std::cout << "[Engine] No input file specified — using synthetic data\n";
+        snapshots = lob::generate_synthetic(args.synthetic_n);
+    }
+
+    auto t1 = std::chrono::high_resolution_clock::now();
+    const double load_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+    std::cout << "[Engine] Data loaded in " << std::fixed << std::setprecision(2)
+              << load_ms << " ms  (" << snapshots.size() << " snapshots)\n";
+
+    if (snapshots.empty()) {
+        std::cerr << "[Engine] No data to process.\n";
+        return 1;
+    }
+
+    // ── 2. Set up components ────────────────────────────────────────────
+    lob::LimitOrderBook book;
+
+    trading::TraderConfig tcfg;
+    tcfg.spread_offset     = args.spread_offset;
+    tcfg.vpin_bucket_vol   = args.vpin_bucket;
+    tcfg.vpin_window       = args.vpin_window;
+    trading::SimulatedTrader trader(tcfg);
+
+    auto store = infra::make_store(args.hazelcast);
+    if (args.hazelcast)
+        store->connect();
+
+    // Time-series accumulators
+    std::vector<double> micro_series, mid_series, obi_series;
+    micro_series.reserve(snapshots.size());
+    mid_series.reserve(snapshots.size());
+    obi_series.reserve(snapshots.size());
+
+    // ── 3. Main tick loop ───────────────────────────────────────────────
+    std::size_t fill_count = 0, abort_count = 0, hold_count = 0;
+
+    auto t2 = std::chrono::high_resolution_clock::now();
+
+    for (std::size_t i = 0; i < snapshots.size(); ++i) {
+        book.update(snapshots[i]);
+
+        const double micro = features::MicroPrice::compute(book);
+        const double mid   = book.mid_price();
+        const double obi   = features::OrderBookImbalance::compute(book);
+
+        micro_series.push_back(micro);
+        mid_series.push_back(mid);
+        obi_series.push_back(obi);
+
+        // ── Trader decision ─────────────────────────────────────────
+        const std::string action = trader.on_tick(book);
+
+        if (action.find("FILL") != std::string::npos) ++fill_count;
+        else if (action.find("ABORT") != std::string::npos) ++abort_count;
+        else ++hold_count;
+
+        // ── Hazelcast store (every 100 ticks to reduce I/O) ─────────
+        if (args.hazelcast && i % 100 == 0) {
+            const std::string key = "tick_" + std::to_string(i);
+
+            // Trade signal as JSON
+            std::string json = "{\"tick\":" + std::to_string(i)
+                + ",\"micro_price\":" + std::to_string(micro)
+                + ",\"mid_price\":" + std::to_string(mid)
+                + ",\"obi\":" + std::to_string(obi)
+                + ",\"action\":\"" + action
+                + "\",\"pnl\":" + std::to_string(trader.total_pnl(mid))
+                + "}";
+            store->put_trade_signal(key, json);
+            store->put_inventory_risk(key, trader.inventory_risk());
+        }
+    }
+
+    auto t3 = std::chrono::high_resolution_clock::now();
+    const double loop_ms = std::chrono::duration<double, std::milli>(t3 - t2).count();
+
+    // ── 4. Research output ──────────────────────────────────────────────
+    std::cout << "\n";
+    std::cout << "╔══════════════════════════════════════════════════╗\n";
+    std::cout << "║          LOB Alpha Research Engine               ║\n";
+    std::cout << "╠══════════════════════════════════════════════════╣\n";
+    std::cout << "║  Ticks processed : " << std::setw(10) << snapshots.size()
+              << "                    ║\n";
+    std::cout << "║  Processing time : " << std::setw(10) << std::fixed
+              << std::setprecision(2) << loop_ms << " ms"
+              << "               ║\n";
+    std::cout << "║  Throughput      : " << std::setw(10) << std::fixed
+              << std::setprecision(0)
+              << (snapshots.size() / (loop_ms / 1000.0)) << " ticks/s"
+              << "          ║\n";
+    std::cout << "╠══════════════════════════════════════════════════╣\n";
+    std::cout << "║  FILLS  : " << std::setw(8) << fill_count
+              << "    ABORTS : " << std::setw(8) << abort_count
+              << "    ║\n";
+    std::cout << "║  HOLDS  : " << std::setw(8) << hold_count
+              << "    TRADES : " << std::setw(8) << trader.trade_count()
+              << "    ║\n";
+    std::cout << "║  Position: " << std::setw(+10) << std::fixed
+              << std::setprecision(2) << trader.position()
+              << "                         ║\n";
+    std::cout << "║  PnL     : " << std::setw(+10) << std::fixed
+              << std::setprecision(4)
+              << trader.total_pnl(mid_series.back())
+              << "                         ║\n";
+    std::cout << "╚══════════════════════════════════════════════════╝\n";
+
+    // ── 5. CSV export ──────────────────────────────────────────────────
+    if (!args.dump_csv.empty()) {
+        std::ofstream csv(args.dump_csv);
+        csv << "tick,mid_price,micro_price,obi,spread,pnl,position,vpin,action\n";
+        const auto& trades = trader.trades();
+        for (std::size_t i = 0; i < snapshots.size(); ++i) {
+            csv << i
+                << "," << std::fixed << std::setprecision(8) << mid_series[i]
+                << "," << micro_series[i]
+                << "," << obi_series[i]
+                << "," << (snapshots[i].asks[0].price - snapshots[i].bids[0].price)
+                << "," << (i < trades.size() ? trades[i].pnl : 0.0)
+                << "," << (i < trades.size() ? static_cast<double>(trades[i].side) : 0.0)
+                << "," << (i < trades.size() ? trades[i].vpin : 0.0)
+                << "," << (i < trades.size() ? trades[i].action : "")
+                << "\n";
+        }
+        std::cout << "[Engine] Exported " << snapshots.size()
+                  << " ticks to " << args.dump_csv << "\n";
+    }
+
+    // ── 6. RMSE analysis ────────────────────────────────────────────────
+    run_rmse_analysis(micro_series, mid_series, {10, 50, 100});
+
+    // ── 6. VPIN summary ─────────────────────────────────────────────────
+    const auto& vpin_hist = trader.vpin_engine().history();
+    if (!vpin_hist.empty()) {
+        std::cout << "\n[VPIN] Observations: " << vpin_hist.size()
+                  << "  |  Mean: " << std::fixed << std::setprecision(6)
+                  << stats::mean(vpin_hist)
+                  << "  |  90th pct: "
+                  << trader.vpin_engine().percentile(90.0)
+                  << "  |  Max: "
+                  << *std::max_element(vpin_hist.begin(), vpin_hist.end())
+                  << "\n";
+    }
+
+    // ── 7. Visualization (if enabled) ───────────────────────────────────
+    if (args.plot) {
+        viz::plot_pnl(trader.pnl_curve(), "SimulatedTrader PnL");
+        viz::plot_micro_vs_mid(micro_series, mid_series,
+                               "Micro-Price vs Mid-Price");
+        if (!vpin_hist.empty())
+            viz::plot_vpin(vpin_hist,
+                           trader.vpin_engine().percentile(90.0),
+                           "VPIN Time-Series");
+    }
+
+    // ── 8. Cleanup ──────────────────────────────────────────────────────
+    if (args.hazelcast)
+        store->disconnect();
+
+    return 0;
+}

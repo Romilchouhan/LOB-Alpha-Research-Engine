@@ -1,0 +1,13 @@
+build/
+data/
+!data/.gitkeep
+plots/
+*.o
+*.a
+*.dylib
+.DS_Store
+**/.DS_Store
+__pycache__/
+*.pyc
+*.zip
+.vscode/
