@@ -63,88 +63,80 @@ that validates the signal *before* it gets promoted to production.
 
 ## Quick Start
 
-### Prerequisites
+### 1. Environment Setup
 
-| Dependency       | Required? | Install (macOS)                              |
-|------------------|-----------|----------------------------------------------|
-| CMake ≥ 3.22     | ✅        | `brew install cmake`                         |
-| C++20 compiler   | ✅        | Xcode Command Line Tools (Apple Clang 15+)   |
-| Boost            | Optional  | `brew install boost`                         |
-| Hazelcast        | Optional  | Docker: `docker run hazelcast/hazelcast`     |
-| Matplotplusplus  | Optional  | Auto-fetched by CMake                        |
-| Python 3 + NumPy | For `preprocess.py` | `pip install numpy`              |
+The engine optional features (Hazelcast, Plotting) require specific external services or libraries.
 
-### Build
-
+**Docker & Hazelcast**
+Hazelcast is used for distributed storage of trade signals and risk metrics.
 ```bash
-# Minimal build (no optional dependencies)
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j$(sysctl -n hw.ncpu)
+# Start Docker (macOS)
+open -a Docker
 
-# Full build (all features)
+# Run Hazelcast instance
+docker run -d --name hazelcast -p 5701:5701 hazelcast/hazelcast
+
+# Run Hazelcast Management Center (UI for monitoring)
+# Access at http://localhost:8080
+docker run -d --name hz-mc -p 8080:8080 hazelcast/management-center
+
+# Hazelcast Cluster Definition
+# Default Name: dev
+# Default Port: 5701
+# Verification: docker logs hazelcast | grep "Cluster Name"
+```
+
+**System Dependencies (macOS)**
+```bash
+brew install cmake boost
+```
+
+### 2. Build the Engine
+
+The engine supports multiple build modes. Enabling optional features will automatically fetch dependencies via `FetchContent`.
+
+| Feature | CMake Flag | Description |
+| :--- | :--- | :--- |
+| **Minimal** | (Default) | Core LOB logic only. |
+| **Boost** | `-DLOB_ENABLE_BOOST=ON` | Uses Boost.Accumulators for high-precision stats. |
+| **Hazelcast** | `-DLOB_ENABLE_HAZELCAST=ON` | Enables distributed signal/risk emission. |
+| **Plotting** | `-DLOB_ENABLE_PLOTTING=ON` | Enables inline C++ plotting via Matplotplusplus. |
+
+**Standard Build (Recommended)**
+```bash
+# Configure with all features enabled
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
       -DLOB_ENABLE_BOOST=ON \
       -DLOB_ENABLE_HAZELCAST=ON \
       -DLOB_ENABLE_PLOTTING=ON
+
+# Build using all CPU cores
 cmake --build build -j$(sysctl -n hw.ncpu)
 ```
 
-### Preprocess FI-2010 Data
+### 3. Run and Generate Plots
 
+#### Preprocess Data
+Download the FI-2010 dataset and convert it to the optimized binary format:
 ```bash
-# Download the FI-2010 dataset from:
-# https://etsin.fairdata.fi/dataset/73eb48d7-4dbc-4a10-a52a-da745b47a649
-
-# Convert to binary
-python scripts/preprocess.py \
-    --input data/fi2010_raw.csv \
-    --output data/lob.bin \
-    --stats
+python3 scripts/preprocess.py --input data/FI-2010.csv --output data/lob.bin --stats
 ```
 
-### Run
-
+#### Run Engine
 ```bash
-# With binary data
-./build/lob_engine --file data/lob.bin
+# Run with Hazelcast & Real-time Plotting (if enabled in build)
+./build/lob_engine --file data/lob.bin --hazelcast --plot
 
-# With raw CSV (slower parsing)
-./build/lob_engine --csv data/fi2010_raw.csv
-
-# Synthetic smoke test (no data files needed)
-./build/lob_engine --synthetic
-
-# Full run with visualization
-./build/lob_engine --file data/lob.bin --plot
-
-# With Hazelcast
-./build/lob_engine --file data/lob.bin --hazelcast
+# Generate CSV data for advanced Python visualization
+./build/lob_engine --file data/lob.bin --dump-csv data/results.csv
 ```
 
----
-
-## Visualizations
-
-The engine can export tick-by-tick data to CSV for high-quality plotting using the included Python script. 
-
-### Synthetic Data (Test)
-Used for smoke-testing and validating algorithm logic without requiring external files.
-- **Location**: `plots/synthetic/`
-- **Generate**: 
-  ```bash
-  ./build/lob_engine --synthetic --synthetic-n 2000 --dump-csv data/results.csv
-  python3 scripts/visualize.py --input data/results.csv --output plots/synthetic/ --dark
-  ```
-
-### Real Data (FI-2010)
-Actual research results from the benchmark dataset.
-- **Location**: `plots/fi2010/`
-- **Generate**: 
-  ```bash
-  python3 scripts/preprocess.py --input data/FI-2010.csv --output data/lob.bin
-  ./build/lob_engine --file data/lob.bin --dump-csv data/fi2010_results.csv
-  python3 scripts/visualize.py --input data/fi2010_results.csv --output plots/fi2010/ --dark
-  ```
+#### Advanced Visualizations
+Use the Python suite for high-fidelity research charts:
+```bash
+# Generate dashboard, pnl, and alpha plots
+python3 scripts/visualize.py --input data/results.csv --output plots/fi2010/ --dark
+```
 
 | Plot Type | Description |
 |-----------|-------------|
