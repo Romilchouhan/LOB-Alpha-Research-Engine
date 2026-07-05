@@ -96,20 +96,6 @@ std::vector<LOBSnapshot> read_binary(const std::filesystem::path& file) {
     return snaps;
 }
 
-void write_binary(const std::filesystem::path& file,
-                  const std::vector<LOBSnapshot>& snapshots) {
-    std::ofstream out(file, std::ios::binary);
-    if (!out.is_open())
-        throw std::runtime_error("Cannot write binary: " + file.string());
-
-    out.write(reinterpret_cast<const char*>(snapshots.data()),
-              static_cast<std::streamsize>(
-                  snapshots.size() * sizeof(LOBSnapshot)));
-
-    std::cout << "[Parser] Wrote " << snapshots.size()
-              << " snapshots to binary\n";
-}
-
 // ── Synthetic data generator ────────────────────────────────────────────────
 
 std::vector<LOBSnapshot> generate_synthetic(std::size_t n) {

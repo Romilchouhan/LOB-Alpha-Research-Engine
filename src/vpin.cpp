@@ -3,11 +3,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 #include "features/vpin.hpp"
+#include "stats/rmse.hpp"
 
-#include <algorithm>
 #include <cmath>
-#include <numeric>
-#include <vector>
 
 namespace features {
 
@@ -83,14 +81,8 @@ void VPIN::flush_bucket_helper(double buy, double sell) {
 }
 
 double VPIN::percentile(double p) const {
-    if (history_.empty()) return 0.0;
-    std::vector<double> sorted = history_;
-    std::sort(sorted.begin(), sorted.end());
-    const double idx = (p / 100.0) * static_cast<double>(sorted.size() - 1);
-    const std::size_t lo = static_cast<std::size_t>(idx);
-    const std::size_t hi = std::min(lo + 1, sorted.size() - 1);
-    const double frac = idx - static_cast<double>(lo);
-    return sorted[lo] * (1.0 - frac) + sorted[hi] * frac;
+    // Delegate to the shared stats helper — single implementation of the math.
+    return stats::percentile(history_, p);
 }
 
 bool VPIN::is_toxic(double p) const {

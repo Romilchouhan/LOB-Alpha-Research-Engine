@@ -14,10 +14,20 @@
 #include <cmath>
 #include <cstddef>
 #include <deque>
+#include <limits>
 #include <vector>
 
 namespace features {
 
+/// VPIN — Volume-Synchronized Probability of Informed Trading.
+///
+/// DATA CAVEAT (FI-2010): FI-2010 is L2 snapshot data with no trade prints.
+/// The tick-rule classification here operates on a depth-change proxy
+/// (BBO volume attributed by mid-price direction), not true executed trades.
+/// Consequently the VPIN values produced on this dataset are NOT a valid
+/// flow-toxicity metric — they measure snapshot-volume asymmetry, not order
+/// flow. The implementation is kept for pedagogical comparison against OFI
+/// (Order Flow Imbalance, coming in P2), which is well-defined on L2 data.
 class VPIN {
 public:
     /// @param bucket_volume  Total volume per bucket.

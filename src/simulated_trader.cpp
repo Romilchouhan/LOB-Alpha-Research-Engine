@@ -5,7 +5,6 @@
 #include "trading/simulated_trader.hpp"
 
 #include <cmath>
-#include <sstream>
 
 namespace trading {
 
@@ -14,13 +13,11 @@ SimulatedTrader::SimulatedTrader(const TraderConfig& cfg)
     , vpin_(cfg.vpin_bucket_vol, cfg.vpin_window)
 {}
 
-std::string SimulatedTrader::on_tick(const lob::LimitOrderBook& book) {
+Action SimulatedTrader::on_tick(const lob::LimitOrderBook& book) {
     const double mid   = book.mid_price();
     const double micro = features::MicroPrice::compute(book);
-    const double obi   = features::OrderBookImbalance::compute(book);
-    const double sprd  = book.spread();
 
-    // Feed the VPIN engine — use best-ask volume as proxy for traded volume
+    // Feed the VPIN engine — use BBO volume as a proxy for traded volume
     // (FI-2010 is snapshot data; no trade-by-trade feed available).
     const double tick_vol = book.best_ask().volume + book.best_bid().volume;
     const double vpin_val = vpin_.update(tick_vol, mid);
@@ -31,21 +28,19 @@ std::string SimulatedTrader::on_tick(const lob::LimitOrderBook& book) {
 
     // 1. Check toxicity: ABORT if VPIN exceeds the configured percentile.
     if (vpin_.is_toxic(cfg_.vpin_toxicity_pct)) {
-        // If we have a position, flatten it aggressively
-        std::string action = "ABORT";
+        // If we have a position, flatten it aggressively (mark-to-market close).
         if (std::abs(position_) > 0.0) {
-            // Mark-to-market close
             realised_pnl_ += position_ * (mid - avg_cost_);
             avg_cost_ = 0.0;
             position_ = 0.0;
-            action = "ABORT_FLATTEN";
         }
         pnl_curve_.push_back(total_pnl(mid));
-        trades_.push_back({tick, mid, 0, total_pnl(mid), vpin_val, action});
-        return action;
+        trades_.push_back({tick, mid, 0, total_pnl(mid), position_, vpin_val,
+                           Action::Abort});
+        return Action::Abort;
     }
 
-    // 2. Passive Fill: buy when micro_price > mid + spread_offset
+    // 2. Passive Buy: buy when micro_price > mid + spread_offset
     //    (indicates the fair price is above the mid, so our limit
     //    buy at the bid is likely to get filled at a good price).
     if (micro > mid + cfg_.spread_offset && position_ < cfg_.position_limit) {
@@ -65,8 +60,9 @@ std::string SimulatedTrader::on_tick(const lob::LimitOrderBook& book) {
         }
 
         pnl_curve_.push_back(total_pnl(mid));
-        trades_.push_back({tick, fill_px, +1, total_pnl(mid), vpin_val, "FILL"});
-        return "FILL";
+        trades_.push_back({tick, fill_px, +1, total_pnl(mid), position_,
+                           vpin_val, Action::PassiveBuy});
+        return Action::PassiveBuy;
     }
 
     // 3. Passive Sell: sell when micro_price < mid - spread_offset
@@ -85,14 +81,16 @@ std::string SimulatedTrader::on_tick(const lob::LimitOrderBook& book) {
         }
 
         pnl_curve_.push_back(total_pnl(mid));
-        trades_.push_back({tick, fill_px, -1, total_pnl(mid), vpin_val, "FILL"});
-        return "FILL";
+        trades_.push_back({tick, fill_px, -1, total_pnl(mid), position_,
+                           vpin_val, Action::PassiveSell});
+        return Action::PassiveSell;
     }
 
     // 4. HOLD — no signal
     pnl_curve_.push_back(total_pnl(mid));
-    trades_.push_back({tick, mid, 0, total_pnl(mid), vpin_val, "HOLD"});
-    return "HOLD";
+    trades_.push_back({tick, mid, 0, total_pnl(mid), position_, vpin_val,
+                       Action::Hold});
+    return Action::Hold;
 }
 
 double SimulatedTrader::unrealised_pnl(double mark) const noexcept {

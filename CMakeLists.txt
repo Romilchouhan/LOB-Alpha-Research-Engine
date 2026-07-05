@@ -19,9 +19,18 @@ else()
 endif()
 
 # ── Options ──────────────────────────────────────────────────────────────────
-option(LOB_ENABLE_HAZELCAST "Build with Hazelcast C++ Client support"  OFF)
-option(LOB_ENABLE_PLOTTING  "Build with Matplotplusplus support"       OFF)
-option(LOB_ENABLE_BOOST     "Use Boost.Accumulators for statistics"    OFF)
+option(LOB_ENABLE_PLOTTING   "Build with Matplotplusplus support"           OFF)
+option(LOB_ENABLE_SANITIZERS "Build with ASan + UBSan instrumentation"      OFF)
+
+# ── Warnings (project targets only — never fetched third-party code) ────────
+set(LOB_WARNING_FLAGS -Wall -Wextra -Wpedantic -Werror)
+
+# ── Sanitizers ───────────────────────────────────────────────────────────────
+if(LOB_ENABLE_SANITIZERS)
+    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+    message(STATUS "[LOB] Sanitizers ENABLED (ASan + UBSan)")
+endif()
 
 # ── FetchContent ─────────────────────────────────────────────────────────────
 include(FetchContent)
@@ -38,64 +47,42 @@ if(LOB_ENABLE_PLOTTING)
     message(STATUS "[LOB] Matplotplusplus ENABLED")
 endif()
 
-# Hazelcast C++ Client (optional)
-if(LOB_ENABLE_HAZELCAST)
-    FetchContent_Declare(
-        hazelcast
-        GIT_REPOSITORY https://github.com/hazelcast/hazelcast-cpp-client.git
-        GIT_TAG        v5.5.0
-        GIT_SHALLOW    TRUE
-    )
-    FetchContent_MakeAvailable(hazelcast)
-    # Force C++20 on the Hazelcast target to resolve Boost 1.90+ / Apple Clang
-    # compatibility (std::decay_t needs proper <type_traits> inclusion).
-    if(TARGET hazelcast-cpp-client)
-        set_target_properties(hazelcast-cpp-client PROPERTIES
-            CXX_STANDARD 20
-            CXX_STANDARD_REQUIRED ON
-        )
-    endif()
-    message(STATUS "[LOB] Hazelcast C++ Client ENABLED")
-endif()
-
-# Boost (optional)
-if(LOB_ENABLE_BOOST)
-    find_package(Boost 1.74 REQUIRED)
-    message(STATUS "[LOB] Boost ENABLED — ${Boost_INCLUDE_DIRS}")
-endif()
-
-# ── Source files ─────────────────────────────────────────────────────────────
-set(LOB_SOURCES
-    src/main.cpp
+# ── Core library (shared between the engine and the test suite) ─────────────
+add_library(lob_core STATIC
     src/fi2010_parser.cpp
     src/vpin.cpp
     src/simulated_trader.cpp
-    src/hazelcast_store.cpp
-    src/visualization.cpp
 )
+target_include_directories(lob_core PUBLIC ${CMAKE_SOURCE_DIR}/include)
+target_compile_options(lob_core PRIVATE ${LOB_WARNING_FLAGS})
 
 # ── Main executable ──────────────────────────────────────────────────────────
-add_executable(lob_engine ${LOB_SOURCES})
-
-target_include_directories(lob_engine PRIVATE
-    ${CMAKE_SOURCE_DIR}/include
+add_executable(lob_engine
+    src/main.cpp
+    src/visualization.cpp
 )
-
-# Compile definitions for optional features
-if(LOB_ENABLE_HAZELCAST)
-    target_compile_definitions(lob_engine PRIVATE LOB_HAS_HAZELCAST=1)
-    target_link_libraries(lob_engine PRIVATE hazelcast-cpp-client)
-endif()
+target_link_libraries(lob_engine PRIVATE lob_core)
+target_compile_options(lob_engine PRIVATE ${LOB_WARNING_FLAGS})
 
 if(LOB_ENABLE_PLOTTING)
     target_compile_definitions(lob_engine PRIVATE LOB_HAS_MATPLOT=1)
     target_link_libraries(lob_engine PRIVATE matplot)
 endif()
 
-if(LOB_ENABLE_BOOST)
-    target_compile_definitions(lob_engine PRIVATE LOB_HAS_BOOST=1)
-    target_include_directories(lob_engine PRIVATE ${Boost_INCLUDE_DIRS})
-endif()
+# ── Tests ────────────────────────────────────────────────────────────────────
+enable_testing()
+
+FetchContent_Declare(
+    googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+    GIT_TAG        v1.14.0
+    GIT_SHALLOW    TRUE
+)
+# Windows-only, but harmless and documented gtest best practice.
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googletest)
+
+add_subdirectory(tests)
 
 # ── Install ──────────────────────────────────────────────────────────────────
 install(TARGETS lob_engine DESTINATION bin)
@@ -106,8 +93,7 @@ message(STATUS "╔════════════════════�
 message(STATUS "║  LOB Alpha Research Engine — FI-2010                       ║")
 message(STATUS "║  C++20 · Apple Silicon · HFT Research                      ║")
 message(STATUS "╠══════════════════════════════════════════════════════════════╣")
-message(STATUS "║  Hazelcast  : ${LOB_ENABLE_HAZELCAST}")
 message(STATUS "║  Plotting   : ${LOB_ENABLE_PLOTTING}")
-message(STATUS "║  Boost      : ${LOB_ENABLE_BOOST}")
+message(STATUS "║  Sanitizers : ${LOB_ENABLE_SANITIZERS}")
 message(STATUS "╚══════════════════════════════════════════════════════════════╝")
 message(STATUS "")

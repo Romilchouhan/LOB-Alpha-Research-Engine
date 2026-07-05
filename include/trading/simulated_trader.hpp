@@ -7,19 +7,39 @@
 #include "features/obi.hpp"
 #include "features/vpin.hpp"
 #include "lob/order_book.hpp"
-#include <string>
+#include <cstdint>
 #include <vector>
 
 namespace trading {
 
-/// Entry in the trade log.
+/// Strategy decision taken on a tick.
+enum class Action : std::uint8_t {
+    Hold,          ///< No signal — do nothing.
+    PassiveBuy,    ///< Passive fill at the best bid.
+    PassiveSell,   ///< Passive fill at the best ask.
+    Abort          ///< VPIN toxicity abort (position flattened if any).
+};
+
+/// Stable string form of an Action (for logs / CSV export).
+[[nodiscard]] constexpr const char* to_string(Action a) noexcept {
+    switch (a) {
+        case Action::Hold:        return "HOLD";
+        case Action::PassiveBuy:  return "PASSIVE_BUY";
+        case Action::PassiveSell: return "PASSIVE_SELL";
+        case Action::Abort:       return "ABORT";
+    }
+    return "UNKNOWN";
+}
+
+/// Entry in the trade log (one record per tick).
 struct TradeRecord {
     std::uint64_t tick;
     double        price;
-    int           side;      // +1 buy, −1 sell
-    double        pnl;
+    int           side;      // +1 buy, −1 sell, 0 none
+    double        pnl;       // total (realised + unrealised) P&L after action
+    double        position;  // net position after action
     double        vpin;
-    std::string   action;    // "FILL", "ABORT", "HOLD"
+    Action        action;
 };
 
 /// Configuration knobs for the strategy.
@@ -36,7 +56,7 @@ public:
     explicit SimulatedTrader(const TraderConfig& cfg = {});
 
     /// Process one LOB snapshot.  Returns the action taken.
-    std::string on_tick(const lob::LimitOrderBook& book);
+    [[nodiscard]] Action on_tick(const lob::LimitOrderBook& book);
 
     // ── Getters ──────────────────────────────────────────────────────────
     [[nodiscard]] double position()       const noexcept { return position_; }

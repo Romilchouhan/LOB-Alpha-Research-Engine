@@ -35,13 +35,6 @@ public:
         return best_ask().price - best_bid().price;
     }
 
-    [[nodiscard]] double weighted_mid_price() const noexcept {
-        const double va = best_ask().volume;
-        const double vb = best_bid().volume;
-        if (va + vb == 0.0) return mid_price();
-        return (best_ask().price * vb + best_bid().price * va) / (va + vb);
-    }
-
     /// Total volume on one side up to `depth` levels.
     [[nodiscard]] double total_volume_ask(int depth = kMaxDepth) const noexcept {
         double sum = 0.0;

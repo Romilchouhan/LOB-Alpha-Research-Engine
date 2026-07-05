@@ -6,7 +6,7 @@
 //   lob_engine --file data/lob.bin            # pre-processed binary
 //   lob_engine --csv  data/fi2010.csv         # raw FI-2010 CSV
 //   lob_engine --synthetic                    # 500-tick synthetic book
-//   lob_engine --file data/lob.bin --hazelcast --plot
+//   lob_engine --file data/lob.bin --plot
 // ─────────────────────────────────────────────────────────────────────────────
 
 #include "lob/fi2010_parser.hpp"
@@ -16,12 +16,12 @@
 #include "features/vpin.hpp"
 #include "stats/rmse.hpp"
 #include "trading/simulated_trader.hpp"
-#include "infra/hazelcast_store.hpp"
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <exception>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -43,7 +43,6 @@ struct Args {
     std::string bin_path;
     std::string dump_csv;        // --dump-csv <path>
     bool        synthetic     = false;
-    bool        hazelcast     = false;
     bool        plot          = false;
     double      spread_offset = 0.0001;
     double      vpin_bucket   = 1000.0;
@@ -60,8 +59,6 @@ static Args parse_args(int argc, char* argv[]) {
             a.bin_path = argv[++i];
         else if (std::strcmp(argv[i], "--synthetic") == 0)
             a.synthetic = true;
-        else if (std::strcmp(argv[i], "--hazelcast") == 0)
-            a.hazelcast = true;
         else if (std::strcmp(argv[i], "--plot") == 0)
             a.plot = true;
         else if (std::strcmp(argv[i], "--dump-csv") == 0 && i + 1 < argc)
@@ -82,7 +79,6 @@ static Args parse_args(int argc, char* argv[]) {
                 "  --synthetic         Generate synthetic LOB data\n"
                 "  --synthetic-n <n>   Number of synthetic ticks (default 500)\n"
                 "  --dump-csv <path>   Export tick data to CSV for plotting\n"
-                "  --hazelcast         Enable Hazelcast distributed store\n"
                 "  --plot              Show Matplotplusplus charts (if compiled)\n"
                 "  --spread-offset <d> Micro-price spread offset (default 0.0001)\n"
                 "  --vpin-bucket <d>   VPIN bucket volume (default 1000)\n"
@@ -128,11 +124,9 @@ static void run_rmse_analysis(const std::vector<double>& micro_series,
     std::cout << "╚═══════════════════╧═════════════════════╝\n";
 }
 
-// ── Main ────────────────────────────────────────────────────────────────────
+// ── Engine body (wrapped by main's try/catch) ───────────────────────────────
 
-int main(int argc, char* argv[]) {
-    const auto args = parse_args(argc, argv);
-
+static int run_engine(const Args& args) {
     // ── 1. Load data ────────────────────────────────────────────────────
     std::vector<lob::LOBSnapshot> snapshots;
 
@@ -166,10 +160,6 @@ int main(int argc, char* argv[]) {
     tcfg.vpin_window       = args.vpin_window;
     trading::SimulatedTrader trader(tcfg);
 
-    auto store = infra::make_store(args.hazelcast);
-    if (args.hazelcast)
-        store->connect();
-
     // Time-series accumulators
     std::vector<double> micro_series, mid_series, obi_series;
     micro_series.reserve(snapshots.size());
@@ -193,26 +183,11 @@ int main(int argc, char* argv[]) {
         obi_series.push_back(obi);
 
         // ── Trader decision ─────────────────────────────────────────
-        const std::string action = trader.on_tick(book);
-
-        if (action.find("FILL") != std::string::npos) ++fill_count;
-        else if (action.find("ABORT") != std::string::npos) ++abort_count;
-        else ++hold_count;
-
-        // ── Hazelcast store (every 100 ticks to reduce I/O) ─────────
-        if (args.hazelcast && i % 100 == 0) {
-            const std::string key = "tick_" + std::to_string(i);
-
-            // Trade signal as JSON
-            std::string json = "{\"tick\":" + std::to_string(i)
-                + ",\"micro_price\":" + std::to_string(micro)
-                + ",\"mid_price\":" + std::to_string(mid)
-                + ",\"obi\":" + std::to_string(obi)
-                + ",\"action\":\"" + action
-                + "\",\"pnl\":" + std::to_string(trader.total_pnl(mid))
-                + "}";
-            store->put_trade_signal(key, json);
-            store->put_inventory_risk(key, trader.inventory_risk());
+        switch (trader.on_tick(book)) {
+            case trading::Action::PassiveBuy:
+            case trading::Action::PassiveSell: ++fill_count;  break;
+            case trading::Action::Abort:       ++abort_count; break;
+            case trading::Action::Hold:        ++hold_count;  break;
         }
     }
 
@@ -261,9 +236,10 @@ int main(int argc, char* argv[]) {
                 << "," << obi_series[i]
                 << "," << (snapshots[i].asks[0].price - snapshots[i].bids[0].price)
                 << "," << (i < trades.size() ? trades[i].pnl : 0.0)
-                << "," << (i < trades.size() ? static_cast<double>(trades[i].side) : 0.0)
+                << "," << (i < trades.size() ? trades[i].position : 0.0)
                 << "," << (i < trades.size() ? trades[i].vpin : 0.0)
-                << "," << (i < trades.size() ? trades[i].action : "")
+                << "," << (i < trades.size() ? trading::to_string(trades[i].action)
+                                             : "")
                 << "\n";
         }
         std::cout << "[Engine] Exported " << snapshots.size()
@@ -273,7 +249,7 @@ int main(int argc, char* argv[]) {
     // ── 6. RMSE analysis ────────────────────────────────────────────────
     run_rmse_analysis(micro_series, mid_series, {10, 50, 100});
 
-    // ── 6. VPIN summary ─────────────────────────────────────────────────
+    // ── 7. VPIN summary ─────────────────────────────────────────────────
     const auto& vpin_hist = trader.vpin_engine().history();
     if (!vpin_hist.empty()) {
         std::cout << "\n[VPIN] Observations: " << vpin_hist.size()
@@ -286,7 +262,7 @@ int main(int argc, char* argv[]) {
                   << "\n";
     }
 
-    // ── 7. Visualization (if enabled) ───────────────────────────────────
+    // ── 8. Visualization (if enabled) ───────────────────────────────────
     if (args.plot) {
         viz::plot_pnl(trader.pnl_curve(), "SimulatedTrader PnL");
         viz::plot_micro_vs_mid(micro_series, mid_series,
@@ -297,9 +273,16 @@ int main(int argc, char* argv[]) {
                            "VPIN Time-Series");
     }
 
-    // ── 8. Cleanup ──────────────────────────────────────────────────────
-    if (args.hazelcast)
-        store->disconnect();
-
     return 0;
+}
+
+// ── Main ────────────────────────────────────────────────────────────────────
+
+int main(int argc, char* argv[]) {
+    try {
+        return run_engine(parse_args(argc, argv));
+    } catch (const std::exception& e) {
+        std::cerr << "[Engine] Fatal error: " << e.what() << "\n";
+        return 1;
+    }
 }

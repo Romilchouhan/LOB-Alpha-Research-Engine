@@ -25,10 +25,6 @@ std::vector<LOBSnapshot> parse_fi2010_csv(const std::filesystem::path& file);
 [[nodiscard]]
 std::vector<LOBSnapshot> read_binary(const std::filesystem::path& file);
 
-/// Write snapshots to a binary file (useful for C++ → C++ round-trip tests).
-void write_binary(const std::filesystem::path& file,
-                  const std::vector<LOBSnapshot>& snapshots);
-
 /// Generate a small synthetic dataset for unit / smoke testing.
 [[nodiscard]]
 std::vector<LOBSnapshot> generate_synthetic(std::size_t n = 500);

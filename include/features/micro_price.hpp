@@ -29,26 +29,6 @@ public:
 
         return pa * (vb / denom) + pb * (va / denom);
     }
-
-    /// Multi-level Micro-Price using top-N levels of depth.
-    [[nodiscard]]
-    static double compute_multilevel(const lob::LimitOrderBook& book,
-                                     int depth = lob::kMaxDepth) noexcept {
-        const auto& snap = book.snapshot();
-        double num = 0.0, total_v = 0.0;
-
-        const int d = std::min(depth, lob::kMaxDepth);
-        for (int i = 0; i < d; ++i) {
-            const double va = snap.asks[i].volume;
-            const double vb = snap.bids[i].volume;
-            num += snap.asks[i].price * vb + snap.bids[i].price * va;
-            total_v += va + vb;
-        }
-        if (total_v <= 0.0) [[unlikely]]
-            return book.mid_price();
-
-        return num / total_v;
-    }
 };
 
 } // namespace features
