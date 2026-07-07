@@ -21,6 +21,7 @@ endif()
 # ── Options ──────────────────────────────────────────────────────────────────
 option(LOB_ENABLE_PLOTTING   "Build with Matplotplusplus support"           OFF)
 option(LOB_ENABLE_SANITIZERS "Build with ASan + UBSan instrumentation"      OFF)
+option(LOB_ENABLE_PARQUET    "Build the Arrow/Parquet feature-matrix writer" ON)
 
 # ── Warnings (project targets only — never fetched third-party code) ────────
 set(LOB_WARNING_FLAGS -Wall -Wextra -Wpedantic -Werror)
@@ -55,6 +56,23 @@ add_library(lob_core STATIC
 )
 target_include_directories(lob_core PUBLIC ${CMAKE_SOURCE_DIR}/include)
 target_compile_options(lob_core PRIVATE ${LOB_WARNING_FLAGS})
+
+# ── Apache Arrow / Parquet (feature-matrix export) ──────────────────────────
+set(LOB_PARQUET_ACTIVE OFF)
+if(LOB_ENABLE_PARQUET)
+    find_package(Arrow CONFIG QUIET)
+    find_package(Parquet CONFIG QUIET)
+    if(Arrow_FOUND AND Parquet_FOUND)
+        set(LOB_PARQUET_ACTIVE ON)
+        target_sources(lob_core PRIVATE src/parquet_writer.cpp)
+        target_link_libraries(lob_core PUBLIC Arrow::arrow_shared Parquet::parquet_shared)
+        target_compile_definitions(lob_core PUBLIC LOB_HAS_PARQUET=1)
+        message(STATUS "[LOB] Parquet writer ENABLED (Arrow ${Arrow_VERSION})")
+    else()
+        message(STATUS "[LOB] Parquet writer DISABLED — Arrow/Parquet not found "
+                       "(brew install apache-arrow)")
+    endif()
+endif()
 
 # ── Main executable ──────────────────────────────────────────────────────────
 add_executable(lob_engine
@@ -95,5 +113,6 @@ message(STATUS "║  C++20 · Apple Silicon · HFT Research                     
 message(STATUS "╠══════════════════════════════════════════════════════════════╣")
 message(STATUS "║  Plotting   : ${LOB_ENABLE_PLOTTING}")
 message(STATUS "║  Sanitizers : ${LOB_ENABLE_SANITIZERS}")
+message(STATUS "║  Parquet    : ${LOB_PARQUET_ACTIVE}")
 message(STATUS "╚══════════════════════════════════════════════════════════════╝")
 message(STATUS "")

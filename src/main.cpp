@@ -11,11 +11,21 @@
 
 #include "lob/fi2010_parser.hpp"
 #include "lob/order_book.hpp"
+#include "features/accel.hpp"
+#include "features/book_slope.hpp"
 #include "features/micro_price.hpp"
 #include "features/obi.hpp"
+#include "features/ofi.hpp"
+#include "features/queue_imbalance.hpp"
+#include "features/realized_vol.hpp"
 #include "features/vpin.hpp"
 #include "stats/rmse.hpp"
 #include "trading/simulated_trader.hpp"
+
+#ifdef LOB_HAS_PARQUET
+#include "io/parquet_writer.hpp"
+#include <optional>
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -42,6 +52,7 @@ struct Args {
     std::string csv_path;
     std::string bin_path;
     std::string dump_csv;        // --dump-csv <path>
+    std::string emit_parquet;    // --emit-parquet <path>
     bool        synthetic     = false;
     bool        plot          = false;
     double      spread_offset = 0.0001;
@@ -63,6 +74,8 @@ static Args parse_args(int argc, char* argv[]) {
             a.plot = true;
         else if (std::strcmp(argv[i], "--dump-csv") == 0 && i + 1 < argc)
             a.dump_csv = argv[++i];
+        else if (std::strcmp(argv[i], "--emit-parquet") == 0 && i + 1 < argc)
+            a.emit_parquet = argv[++i];
         else if (std::strcmp(argv[i], "--spread-offset") == 0 && i + 1 < argc)
             a.spread_offset = std::stod(argv[++i]);
         else if (std::strcmp(argv[i], "--vpin-bucket") == 0 && i + 1 < argc)
@@ -79,6 +92,7 @@ static Args parse_args(int argc, char* argv[]) {
                 "  --synthetic         Generate synthetic LOB data\n"
                 "  --synthetic-n <n>   Number of synthetic ticks (default 500)\n"
                 "  --dump-csv <path>   Export tick data to CSV for plotting\n"
+                "  --emit-parquet <p>  Export full feature matrix to Parquet\n"
                 "  --plot              Show Matplotplusplus charts (if compiled)\n"
                 "  --spread-offset <d> Micro-price spread offset (default 0.0001)\n"
                 "  --vpin-bucket <d>   VPIN bucket volume (default 1000)\n"
@@ -166,6 +180,23 @@ static int run_engine(const Args& args) {
     mid_series.reserve(snapshots.size());
     obi_series.reserve(snapshots.size());
 
+    // P2 feature engines (all strictly backward-looking)
+    features::OrderFlowImbalance ofi_engine(50);
+    features::RealizedVolatility rv50_engine(50);
+    features::RealizedVolatility rv200_engine(200);
+    features::MidAcceleration    accel_engine;
+
+#ifdef LOB_HAS_PARQUET
+    std::optional<io::ParquetWriter> parquet;
+    if (!args.emit_parquet.empty())
+        parquet.emplace(args.emit_parquet);
+#else
+    if (!args.emit_parquet.empty())
+        std::cerr << "[Engine] --emit-parquet ignored: built without Arrow/Parquet "
+                     "(configure with -DLOB_ENABLE_PARQUET=ON and install "
+                     "apache-arrow)\n";
+#endif
+
     // ── 3. Main tick loop ───────────────────────────────────────────────
     std::size_t fill_count = 0, abort_count = 0, hold_count = 0;
 
@@ -182,6 +213,12 @@ static int run_engine(const Args& args) {
         mid_series.push_back(mid);
         obi_series.push_back(obi);
 
+        // ── P2 feature updates (cheap, O(1) each) ───────────────────
+        const double ofi   = ofi_engine.update(snapshots[i]);
+        const double rv50  = rv50_engine.update(mid);
+        const double rv200 = rv200_engine.update(mid);
+        const double accel = accel_engine.update(mid);
+
         // ── Trader decision ─────────────────────────────────────────
         switch (trader.on_tick(book)) {
             case trading::Action::PassiveBuy:
@@ -189,6 +226,30 @@ static int run_engine(const Args& args) {
             case trading::Action::Abort:       ++abort_count; break;
             case trading::Action::Hold:        ++hold_count;  break;
         }
+
+#ifdef LOB_HAS_PARQUET
+        if (parquet) {
+            const auto slope = features::BookSlope::compute(book);
+            io::FeatureRow row;
+            row.tick        = static_cast<std::int64_t>(i);
+            row.mid         = mid;
+            row.spread      = book.spread();
+            row.micro_price = micro;
+            row.obi         = obi;
+            row.ofi         = ofi;
+            row.ofi_rolling = ofi_engine.rolling_sum();
+            row.bid_slope   = slope.bid_slope;
+            row.ask_slope   = slope.ask_slope;
+            row.qimb        = features::QueueImbalance::compute(book);
+            row.rv_50       = rv50;
+            row.rv_200      = rv200;
+            row.accel       = accel;
+            row.vpin        = trader.vpin_engine().value();
+            parquet->append(row);
+        }
+#else
+        (void)ofi; (void)rv50; (void)rv200; (void)accel;
+#endif
     }
 
     auto t3 = std::chrono::high_resolution_clock::now();
@@ -245,6 +306,16 @@ static int run_engine(const Args& args) {
         std::cout << "[Engine] Exported " << snapshots.size()
                   << " ticks to " << args.dump_csv << "\n";
     }
+
+    // ── 5b. Parquet feature-matrix export ──────────────────────────────
+#ifdef LOB_HAS_PARQUET
+    if (parquet) {
+        parquet->finalize();
+        std::cout << "[Engine] Wrote " << parquet->rows()
+                  << "-row feature matrix to " << parquet->path().string()
+                  << "\n";
+    }
+#endif
 
     // ── 6. RMSE analysis ────────────────────────────────────────────────
     run_rmse_analysis(micro_series, mid_series, {10, 50, 100});
