@@ -72,6 +72,19 @@ Hot-path throughput: ~12M ticks/s on Apple M2 (feature compute only).
 
 ---
 
+## Interactive explainer
+
+`web/index.html` is a self-contained, animated walkthrough of the micro-price:
+a live order-book simulation, an interactive Stoikov calculator, and the honest
+FI-2010 evidence (short-horizon directional edge, decaying with horizon,
+reversing at extreme tilt). Open the file in a browser, or serve it:
+
+```bash
+python3 -m http.server -d web 8787   # then open http://localhost:8787
+```
+
+---
+
 ## Quick start (Docker — one command)
 
 The whole pipeline — build the C++ engine, generate the feature matrix, serve an

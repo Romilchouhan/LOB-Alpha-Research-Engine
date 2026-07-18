@@ -1,0 +1,695 @@
+<meta charset="utf-8" />
+<title>Micro-Price · How the order book predicts the next tick</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  /* ── Tokens (light default; dark overrides via media + data-theme) ──────── */
+  :root {
+    --bg:      #F4F6FA;
+    --panel:   #FFFFFF;
+    --panel-2: #FBFCFE;
+    --ink:     #0D1220;
+    --muted:   #586074;
+    --faint:   #8A92A6;
+    --line:    #E3E7F0;
+    --accent:  #4F46E5;   /* micro-price — the brand signal */
+    --accent-2:#0E9BB0;
+    --bid:     #0C9A6A;
+    --ask:     #E0454B;
+    --warn:    #B9760A;
+    --shadow:  0 1px 2px rgba(13,18,32,.06), 0 8px 30px rgba(13,18,32,.06);
+    --font-mono: "SFMono-Regular", ui-monospace, "JetBrains Mono", "Menlo", "Consolas", monospace;
+    --font-body: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:      #080A10;
+      --panel:   #10131C;
+      --panel-2: #0C0F17;
+      --ink:     #E8EBF4;
+      --muted:   #949CB2;
+      --faint:   #626B82;
+      --line:    #1F2536;
+      --accent:  #8B84FF;
+      --accent-2:#34D3E6;
+      --bid:     #2FD79B;
+      --ask:     #FF6472;
+      --warn:    #E7B24A;
+      --shadow:  0 1px 2px rgba(0,0,0,.4), 0 12px 40px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="light"] {
+    --bg:#F4F6FA; --panel:#FFFFFF; --panel-2:#FBFCFE; --ink:#0D1220; --muted:#586074;
+    --faint:#8A92A6; --line:#E3E7F0; --accent:#4F46E5; --accent-2:#0E9BB0; --bid:#0C9A6A;
+    --ask:#E0454B; --warn:#B9760A; --shadow:0 1px 2px rgba(13,18,32,.06),0 8px 30px rgba(13,18,32,.06);
+  }
+  :root[data-theme="dark"] {
+    --bg:#080A10; --panel:#10131C; --panel-2:#0C0F17; --ink:#E8EBF4; --muted:#949CB2;
+    --faint:#626B82; --line:#1F2536; --accent:#8B84FF; --accent-2:#34D3E6; --bid:#2FD79B;
+    --ask:#FF6472; --warn:#E7B24A; --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 40px rgba(0,0,0,.35);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--font-body); line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+  /* ── Typographic system ─────────────────────────────────────────────────── */
+  .eyebrow {
+    font-family: var(--font-mono); font-size: 12px; letter-spacing: .18em;
+    text-transform: uppercase; color: var(--accent); font-weight: 600;
+  }
+  h1, h2, h3 { font-family: var(--font-mono); font-weight: 600; text-wrap: balance; letter-spacing: -0.01em; }
+  h1 { font-size: clamp(30px, 5.2vw, 58px); line-height: 1.04; margin: 0; letter-spacing: -0.02em; }
+  h2 { font-size: clamp(22px, 3vw, 32px); line-height: 1.12; margin: 0 0 12px; }
+  h3 { font-size: 16px; margin: 0 0 6px; }
+  p  { color: var(--muted); }
+  .lead { font-size: clamp(16px, 1.6vw, 19px); color: var(--muted); max-width: 62ch; }
+  .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  .num  { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  a { color: var(--accent); }
+
+  /* ── Top bar ────────────────────────────────────────────────────────────── */
+  header.bar {
+    position: sticky; top: 0; z-index: 50; backdrop-filter: blur(12px);
+    background: color-mix(in srgb, var(--bg) 82%, transparent);
+    border-bottom: 1px solid var(--line);
+  }
+  .bar .wrap { display: flex; align-items: center; justify-content: space-between; height: 58px; }
+  .brand { font-family: var(--font-mono); font-weight: 600; letter-spacing: -.01em; display: flex; gap: 10px; align-items: center; }
+  .brand .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent); }
+  .bar nav { display: flex; gap: 22px; align-items: center; }
+  .bar nav a { color: var(--muted); text-decoration: none; font-size: 14px; }
+  .bar nav a:hover { color: var(--ink); }
+  .theme-btn {
+    font-family: var(--font-mono); font-size: 12px; color: var(--muted); cursor: pointer;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px;
+  }
+  .theme-btn:hover { color: var(--ink); }
+  @media (max-width: 680px) { .bar nav a.navlink { display: none; } }
+
+  /* ── Section rhythm ─────────────────────────────────────────────────────── */
+  section { padding: 84px 0; border-top: 1px solid var(--line); }
+  section:first-of-type { border-top: 0; }
+  .sec-head { display: flex; flex-direction: column; gap: 10px; margin-bottom: 34px; max-width: 68ch; }
+
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+    box-shadow: var(--shadow);
+  }
+
+  /* ── Hero ───────────────────────────────────────────────────────────────── */
+  .hero { padding-top: 56px; }
+  .hero-grid { display: grid; grid-template-columns: 1.05fr 1fr; gap: 40px; align-items: center; }
+  @media (max-width: 900px) { .hero-grid { grid-template-columns: 1fr; gap: 28px; } }
+  .hero h1 span.lift { color: var(--accent); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 26px; }
+  .chip {
+    font-family: var(--font-mono); font-size: 12px; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 999px; padding: 5px 11px; background: var(--panel);
+  }
+  .chip b { color: var(--ink); font-weight: 600; }
+
+  /* Live board */
+  .board { padding: 16px; }
+  .board-top { display: flex; justify-content: space-between; align-items: baseline; padding: 4px 6px 12px; }
+  .board-top .ttl { font-family: var(--font-mono); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
+  .live { display: inline-flex; gap: 7px; align-items: center; font-family: var(--font-mono); font-size: 11px; color: var(--bid); letter-spacing: .1em; }
+  .live .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--bid); animation: pulse 1.6s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
+  .board-body { display: grid; grid-template-columns: 150px 1fr; gap: 14px; }
+  @media (max-width: 420px) { .board-body { grid-template-columns: 1fr; } }
+  canvas { display: block; width: 100%; }
+  .readouts { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin-top: 14px; }
+  .ro { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .ro .k { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); }
+  .ro .v { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 19px; font-weight: 600; margin-top: 3px; }
+  .v.mid   { color: var(--ink); }
+  .v.micro { color: var(--accent); }
+  .v.tilt  { color: var(--muted); }
+
+  /* ── Calculator ─────────────────────────────────────────────────────────── */
+  .calc { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; align-items: stretch; }
+  @media (max-width: 860px) { .calc { grid-template-columns: 1fr; } }
+  .calc .pad { padding: 26px; display: flex; flex-direction: column; gap: 22px; }
+  .ctrl label { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 13px; margin-bottom: 8px; }
+  .ctrl label .val { color: var(--ink); font-weight: 600; }
+  .ctrl.bid label .val { color: var(--bid); }
+  .ctrl.ask label .val { color: var(--ask); }
+  input[type=range] { width: 100%; -webkit-appearance: none; appearance: none; height: 6px; border-radius: 6px; background: var(--line); outline: none; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: var(--panel); border: 2px solid var(--accent); cursor: pointer; box-shadow: var(--shadow); }
+  input[type=range]::-moz-range-thumb { width: 20px; height: 20px; border-radius: 50%; background: var(--panel); border: 2px solid var(--accent); cursor: pointer; }
+  .ctrl.bid input[type=range]::-webkit-slider-thumb { border-color: var(--bid); }
+  .ctrl.ask input[type=range]::-webkit-slider-thumb { border-color: var(--ask); }
+  input:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 40%, transparent); }
+
+  .formula {
+    font-family: var(--font-mono); font-size: 13.5px; line-height: 1.9; color: var(--muted);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px;
+    overflow-x: auto;
+  }
+  .formula .hl-bid { color: var(--bid); font-weight: 600; }
+  .formula .hl-ask { color: var(--ask); font-weight: 600; }
+  .formula .hl-mic { color: var(--accent); font-weight: 600; }
+  .verdict { font-family: var(--font-mono); font-size: 14px; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-2); }
+  .verdict b { color: var(--ink); }
+
+  /* Price axis inside calculator */
+  .axiswrap { padding: 26px; display: flex; flex-direction: column; gap: 18px; }
+  .beam-note { font-size: 13px; color: var(--muted); }
+
+  /* ── Stat grid ──────────────────────────────────────────────────────────── */
+  .stats { display: grid; grid-template-columns: repeat(4,1fr); gap: 16px; }
+  @media (max-width: 760px) { .stats { grid-template-columns: repeat(2,1fr); } }
+  .stat { padding: 18px 18px 16px; }
+  .stat .n { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 30px; font-weight: 600; letter-spacing: -.01em; }
+  .stat .l { font-size: 13px; color: var(--muted); margin-top: 2px; }
+  .stat.good .n { color: var(--bid); }
+  .stat.bad .n  { color: var(--ask); }
+  .stat.acc .n  { color: var(--accent); }
+
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+  @media (max-width: 860px) { .two { grid-template-columns: 1fr; } }
+  .chartcard { padding: 22px; }
+  .chartcard h3 { font-family: var(--font-mono); }
+  .chartcard .cap { font-size: 13px; color: var(--muted); margin: 2px 0 14px; }
+  figcaption { font-size: 12.5px; color: var(--faint); margin-top: 10px; font-family: var(--font-mono); }
+
+  .callout {
+    border-left: 3px solid var(--warn); background: color-mix(in srgb, var(--warn) 8%, var(--panel));
+    padding: 16px 18px; border-radius: 0 12px 12px 0;
+  }
+  .callout h3 { color: var(--warn); font-family: var(--font-mono); }
+  .callout p { color: var(--muted); margin: 6px 0 0; }
+
+  ul.clean { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 12px; }
+  ul.clean li { padding-left: 26px; position: relative; color: var(--muted); }
+  ul.clean li::before { content: "→"; position: absolute; left: 0; color: var(--accent); font-family: var(--font-mono); }
+  ul.clean li b { color: var(--ink); font-weight: 600; }
+
+  footer { padding: 48px 0 64px; border-top: 1px solid var(--line); }
+  .foot { display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; align-items: center; }
+  .foot .mono { font-size: 12.5px; color: var(--faint); }
+
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .legend span { display: inline-flex; gap: 7px; align-items: center; }
+  .legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+
+  @media (prefers-reduced-motion: reduce) { .live .pulse { animation: none; } }
+</style>
+
+<header class="bar">
+  <div class="wrap">
+    <div class="brand"><span class="dot"></span>MICRO-PRICE</div>
+    <nav>
+      <a class="navlink" href="#calc">Calculation</a>
+      <a class="navlink" href="#predict">Does it predict?</a>
+      <a class="navlink" href="#evidence">Evidence</a>
+      <button class="theme-btn" id="theme" aria-label="Toggle color theme">◐ theme</button>
+    </nav>
+  </div>
+</header>
+
+<!-- ── HERO ─────────────────────────────────────────────────────────────── -->
+<section class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <div class="eyebrow">Limit-order-book microstructure · FI-2010</div>
+      <h1 style="margin-top:14px">The mid-price is a guess.<br /><span class="lift">The micro-price</span> reads the queue.</h1>
+      <p class="lead" style="margin-top:18px">
+        Mid-price sits halfway between best bid and best ask — blind to how much size
+        is resting on each side. The <b style="color:var(--ink)">micro-price</b> (Stoikov)
+        weights the mid by that queue imbalance, so it leans toward the side the book is
+        about to move to. Watch it lead the mid in real time.
+      </p>
+      <div class="chips">
+        <span class="chip"><b>Stoikov</b> volume-weighted fair value</span>
+        <span class="chip">C++20 hot path · <b>12M ticks/s</b></span>
+        <span class="chip">FI-2010 · <b>362,400</b> snapshots</span>
+      </div>
+    </div>
+
+    <div class="panel board">
+      <div class="board-top">
+        <span class="ttl">Live book · illustrative</span>
+        <span class="live"><span class="pulse"></span>STREAMING</span>
+      </div>
+      <div class="board-body">
+        <canvas id="ladder" height="240" aria-label="Animated order-book depth ladder"></canvas>
+        <canvas id="tape" height="240" aria-label="Rolling mid-price versus micro-price"></canvas>
+      </div>
+      <div class="readouts">
+        <div class="ro"><div class="k">Mid</div><div class="v mid num" id="ro-mid">—</div></div>
+        <div class="ro"><div class="k">Micro</div><div class="v micro num" id="ro-micro">—</div></div>
+        <div class="ro"><div class="k">Tilt</div><div class="v tilt num" id="ro-tilt">—</div></div>
+      </div>
+      <div class="legend" style="padding:12px 6px 4px">
+        <span><i style="background:var(--ink)"></i>mid</span>
+        <span><i style="background:var(--accent)"></i>micro-price</span>
+        <span><i style="background:var(--bid)"></i>bid depth</span>
+        <span><i style="background:var(--ask)"></i>ask depth</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── CALCULATION ──────────────────────────────────────────────────────── -->
+<section id="calc">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">01 · How it's calculated</div>
+      <h2>One line of math: weight the mid by who is waiting</h2>
+      <p>Drag the resting size on each side. The micro-price slides along the spread —
+        toward the <i>heavier</i> queue's opposite price, because a thick bid gets consumed
+        slower and pushes the fair value up. Everything updates live.</p>
+    </div>
+
+    <div class="calc">
+      <div class="panel pad">
+        <div class="ctrl bid">
+          <label for="vbid">Bid queue &nbsp;V<sub>bid</sub> <span class="val" id="vbid-val">180</span></label>
+          <input type="range" id="vbid" min="10" max="500" value="180" step="1" />
+        </div>
+        <div class="ctrl ask">
+          <label for="vask">Ask queue &nbsp;V<sub>ask</sub> <span class="val" id="vask-val">80</span></label>
+          <input type="range" id="vask" min="10" max="500" value="80" step="1" />
+        </div>
+
+        <div class="formula" aria-hidden="true">
+          μ =
+          <span class="hl-ask">P<sub>ask</sub></span> ·
+          <span class="hl-bid">V<sub>bid</sub></span> / (V<sub>bid</sub>+V<sub>ask</sub>)
+          &nbsp;+&nbsp;
+          <span class="hl-bid">P<sub>bid</sub></span> ·
+          <span class="hl-ask">V<sub>ask</sub></span> / (V<sub>bid</sub>+V<sub>ask</sub>)
+          <br />
+          μ =
+          <span class="hl-ask">100.02</span> · <span id="f-wbid">0.69</span>
+          + <span class="hl-bid">99.98</span> · <span id="f-wask">0.31</span>
+          = <span class="hl-mic" id="f-micro">100.0076</span>
+        </div>
+
+        <div class="verdict" id="verdict">
+          Heavier <b style="color:var(--bid)">bid</b> → micro sits
+          <b id="v-side">above</b> the mid by <b class="num" id="v-bps">+7.6 bp</b> → <b id="v-dir">upward pressure</b>.
+        </div>
+      </div>
+
+      <div class="panel axiswrap">
+        <canvas id="beam" height="120" aria-label="Balance beam showing queue imbalance"></canvas>
+        <canvas id="axis" height="150" aria-label="Price axis showing bid, mid, micro, ask"></canvas>
+        <p class="beam-note">The beam tilts with imbalance; the marker below shows where the
+          micro-price falls between the best bid and best ask. At a balanced book it rests
+          exactly on the mid.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── DOES IT PREDICT ──────────────────────────────────────────────────── -->
+<section id="predict">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">02 · The hypothesis</div>
+      <h2>If the tilt is information, the mid should follow it</h2>
+      <p>The mechanism above is just a definition — it proves nothing on its own. The testable
+        claim: when the micro-price leans up at tick <span class="mono">t</span>, the mid-price
+        should tend to rise over the next few ticks. So we measured it on real FI-2010 data.
+        The result is real, and it is <i>not</i> a fairy tale.</p>
+    </div>
+    <div class="stats">
+      <div class="stat acc panel"><div class="n num">52.2%</div><div class="l">tilt predicts next-tick direction (vs 50% coin-flip)</div></div>
+      <div class="stat good panel"><div class="n num">57.0%</div><div class="l">hit-rate at <i>moderate</i> tilt — the signal's sweet spot</div></div>
+      <div class="stat bad panel"><div class="n num">41.7%</div><div class="l">hit-rate at <i>extreme</i> tilt — it reverses (bid-ask bounce)</div></div>
+      <div class="stat panel"><div class="n num acc" style="color:var(--muted)">~30</div><div class="l">ticks until the edge decays to noise</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ── EVIDENCE ─────────────────────────────────────────────────────────── -->
+<section id="evidence">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">03 · What the data actually says</div>
+      <h2>Real FI-2010 — measured, not asserted</h2>
+      <p>Signal = <span class="mono">micro − mid</span> at tick <span class="mono">t</span>.
+        Outcome = sign of the mid-price change over the next <span class="mono">k</span> ticks.
+        Hit-rate is the share of ticks where the sign matched. 50% is a coin flip.</p>
+    </div>
+
+    <div class="two">
+      <figure class="panel chartcard" style="margin:0">
+        <h3>Edge decays with horizon</h3>
+        <div class="cap">A short-horizon effect: strongest at the next tick, gone within ~30.</div>
+        <canvas id="chart-h" height="260" aria-label="Hit-rate versus forward horizon"></canvas>
+        <figcaption>hit-rate vs forward horizon k · 362,400 ticks</figcaption>
+      </figure>
+
+      <figure class="panel chartcard" style="margin:0">
+        <h3>The signal has a sweet spot</h3>
+        <div class="cap">Binned by tilt strength (deciles). Moderate tilts continue; the
+          most extreme tilt mean-reverts — so bigger is <i>not</i> better.</div>
+        <canvas id="chart-d" height="260" aria-label="Hit-rate by tilt-strength decile"></canvas>
+        <figcaption>hit-rate by |micro − mid| decile · next-tick</figcaption>
+      </figure>
+    </div>
+
+    <div class="callout" style="margin-top:24px">
+      <h3>What this is not</h3>
+      <p>This is a feature study, not a trading result. Numbers are <b>in-sample on a single
+        instrument</b>, on the <b>normalized</b> FI-2010 benchmark (which compresses the
+        price grid and understates the raw edge). There is <b>no fill model, no costs, no PnL</b>.
+        A 52–57% directional hit-rate is a real signal, not a strategy.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ── PHASE 1 ──────────────────────────────────────────────────────────── -->
+<section>
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">04 · Next</div>
+      <h2>How this gets tested for real</h2>
+    </div>
+    <ul class="clean" style="max-width:70ch">
+      <li><b>Decimal-precision data.</b> Rebuild on the un-normalized FI-2010 with the canonical Day 1-7 / 8-10 split, so the edge is measured on a real price grid.</li>
+      <li><b>Proper labels.</b> 3-class smoothed-mid direction at horizons k ∈ {10,20,50,100}, per Ntakaris et al.</li>
+      <li><b>IC / rank-IC per feature</b> vs forward return — the decay curve above, done rigorously across every feature, not just micro − mid.</li>
+      <li><b>Honest baselines.</b> Logistic regression + LightGBM, walk-forward, benchmarked against published DeepLOB accuracy — with block-bootstrap confidence intervals and leave-one-feature-out ablation.</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap foot">
+    <div class="mono">Micro-Price-LOB · C++20 feature pipeline → Parquet → Python research</div>
+    <div class="mono">Stoikov (2018) · Easley–López de Prado–O'Hara · FI-2010 (Ntakaris 2018)</div>
+  </div>
+</footer>
+
+<script>
+(() => {
+  "use strict";
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // ── Theme toggle ────────────────────────────────────────────────────────
+  const root = document.documentElement;
+  document.getElementById("theme").addEventListener("click", () => {
+    const cur = getComputedStyle(root).getPropertyValue("--isdark").trim();
+    const isDark = root.getAttribute("data-theme")
+      ? root.getAttribute("data-theme") === "dark"
+      : matchMedia("(prefers-color-scheme: dark)").matches;
+    root.setAttribute("data-theme", isDark ? "light" : "dark");
+  });
+  const css = (v) => getComputedStyle(root).getPropertyValue(v).trim();
+
+  // HiDPI canvas setup
+  function fit(cv, h) {
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    const w = cv.clientWidth || cv.parentElement.clientWidth;
+    cv.width = w * dpr; cv.height = h * dpr;
+    const ctx = cv.getContext("2d"); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { ctx, w, h };
+  }
+
+  // ── Shared micro-price sim (hero) ───────────────────────────────────────
+  const TICK = 0.01;
+  let fair = 100.00;
+  const hist = [];               // {mid, micro}
+  const LEVELS = 8;
+  let bidSz = [], askSz = [];
+  function reseed() {
+    bidSz = []; askSz = [];
+    for (let i = 0; i < LEVELS; i++) {
+      bidSz.push(40 + Math.random() * 120 * (1 - i / (LEVELS + 2)));
+      askSz.push(40 + Math.random() * 120 * (1 - i / (LEVELS + 2)));
+    }
+  }
+  reseed();
+
+  function step() {
+    // jitter best-level sizes to create shifting imbalance
+    for (let i = 0; i < LEVELS; i++) {
+      bidSz[i] = Math.max(8, bidSz[i] + (Math.random() - 0.5) * 26);
+      askSz[i] = Math.max(8, askSz[i] + (Math.random() - 0.5) * 26);
+    }
+    const bestBid = fair - TICK / 2, bestAsk = fair + TICK / 2;
+    const vb = bidSz[0], va = askSz[0];
+    const micro = bestAsk * (vb / (vb + va)) + bestBid * (va / (vb + va));
+    const mid = (bestBid + bestAsk) / 2;
+    // mechanism illustration: fair value drifts toward the micro lean, plus noise
+    const lean = (micro - mid);
+    fair += lean * 0.55 + (Math.random() - 0.5) * TICK * 1.1;
+    hist.push({ mid, micro });
+    if (hist.length > 160) hist.shift();
+    return { mid, micro, vb, va };
+  }
+
+  const ladder = document.getElementById("ladder");
+  const tape = document.getElementById("tape");
+  const roMid = document.getElementById("ro-mid");
+  const roMicro = document.getElementById("ro-micro");
+  const roTilt = document.getElementById("ro-tilt");
+
+  function drawLadder(s) {
+    const { ctx, w, h } = fit(ladder, 240);
+    ctx.clearRect(0, 0, w, h);
+    const rowH = h / (LEVELS * 2 + 1);
+    const maxSz = 170, cx = w * 0.5;
+    ctx.font = "10px " + css("--font-mono");
+    const midY = h / 2;
+    // asks above, bids below
+    for (let i = LEVELS - 1; i >= 0; i--) {
+      const y = midY - (i + 1) * rowH;
+      const wdt = (askSz[i] / maxSz) * (w * 0.44);
+      ctx.fillStyle = css("--ask");
+      ctx.globalAlpha = i === 0 ? 0.95 : 0.4 - i * 0.03;
+      ctx.fillRect(cx, y, wdt, rowH - 1.5);
+    }
+    for (let i = 0; i < LEVELS; i++) {
+      const y = midY + i * rowH + 1;
+      const wdt = (bidSz[i] / maxSz) * (w * 0.44);
+      ctx.fillStyle = css("--bid");
+      ctx.globalAlpha = i === 0 ? 0.95 : 0.4 - i * 0.03;
+      ctx.fillRect(cx - wdt, y, wdt, rowH - 1.5);
+    }
+    ctx.globalAlpha = 1;
+    // mid line
+    ctx.strokeStyle = css("--line"); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, midY); ctx.lineTo(w, midY); ctx.stroke();
+  }
+
+  function drawTape() {
+    const { ctx, w, h } = fit(tape, 240);
+    ctx.clearRect(0, 0, w, h);
+    if (hist.length < 2) return;
+    let lo = Infinity, hi = -Infinity;
+    for (const p of hist) { lo = Math.min(lo, p.mid, p.micro); hi = Math.max(hi, p.mid, p.micro); }
+    const pad = (hi - lo) * 0.25 + 1e-6; lo -= pad; hi += pad;
+    const X = (i) => (i / (hist.length - 1)) * (w - 4) + 2;
+    const Y = (v) => h - 8 - ((v - lo) / (hi - lo)) * (h - 16);
+    // grid
+    ctx.strokeStyle = css("--line"); ctx.lineWidth = 1;
+    for (let g = 0; g <= 3; g++) { const y = 8 + g * (h - 16) / 3; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+    const line = (key, color, wd) => {
+      ctx.strokeStyle = color; ctx.lineWidth = wd; ctx.beginPath();
+      hist.forEach((p, i) => { const x = X(i), y = Y(p[key]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+      ctx.stroke();
+    };
+    line("mid", css("--ink"), 1.4);
+    line("micro", css("--accent"), 2);
+    // endpoint dot on micro
+    const last = hist[hist.length - 1];
+    ctx.fillStyle = css("--accent");
+    ctx.beginPath(); ctx.arc(X(hist.length - 1), Y(last.micro), 3.2, 0, 7); ctx.fill();
+  }
+
+  let acc = 0;
+  function heroFrame(dt) {
+    acc += dt;
+    if (acc > 90) {            // ~11 fps sim cadence, smooth enough, calm
+      acc = 0;
+      const s = step();
+      roMid.textContent = s.mid.toFixed(2);
+      roMicro.textContent = s.micro.toFixed(4);
+      const bp = (s.micro - s.mid) / s.mid * 1e4;
+      roTilt.textContent = (bp >= 0 ? "+" : "") + bp.toFixed(1) + " bp";
+      roTilt.style.color = bp >= 0 ? css("--bid") : css("--ask");
+    }
+    drawLadder(); drawTape();
+  }
+
+  // ── Calculator ──────────────────────────────────────────────────────────
+  const P_BID = 99.98, P_ASK = 100.02, MID = (P_BID + P_ASK) / 2;
+  const vbid = document.getElementById("vbid"), vask = document.getElementById("vask");
+  const beam = document.getElementById("beam"), axis = document.getElementById("axis");
+
+  function calc() {
+    const vb = +vbid.value, va = +vask.value;
+    document.getElementById("vbid-val").textContent = vb;
+    document.getElementById("vask-val").textContent = va;
+    const wbid = vb / (vb + va), wask = va / (vb + va);
+    const micro = P_ASK * wbid + P_BID * wask;
+    const bp = (micro - MID) / MID * 1e4;
+    document.getElementById("f-wbid").textContent = wbid.toFixed(2);
+    document.getElementById("f-wask").textContent = wask.toFixed(2);
+    document.getElementById("f-micro").textContent = micro.toFixed(4);
+    document.getElementById("v-side").textContent = bp > 0.05 ? "above" : bp < -0.05 ? "below" : "on";
+    document.getElementById("v-bps").textContent = (bp >= 0 ? "+" : "") + bp.toFixed(1) + " bp";
+    const dir = document.getElementById("v-dir");
+    dir.textContent = bp > 0.05 ? "upward pressure" : bp < -0.05 ? "downward pressure" : "balanced";
+    dir.style.color = bp > 0.05 ? css("--bid") : bp < -0.05 ? css("--ask") : css("--muted");
+    drawBeam(vb, va); drawAxis(micro);
+  }
+
+  function drawBeam(vb, va) {
+    const { ctx, w, h } = fit(beam, 120);
+    ctx.clearRect(0, 0, w, h);
+    const cx = w / 2, cy = 42, arm = Math.min(w * 0.36, 200);
+    const imb = (vb - va) / (vb + va);       // -1..1
+    const ang = imb * 0.32;                    // heavier bid dips left
+    // pivot
+    ctx.strokeStyle = css("--faint"); ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx, cy + 46); ctx.stroke();
+    // beam
+    const lx = cx - Math.cos(ang) * arm, ly = cy + Math.sin(ang) * arm;
+    const rx = cx + Math.cos(ang) * arm, ry = cy - Math.sin(ang) * arm;
+    ctx.strokeStyle = css("--ink"); ctx.lineWidth = 3; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(rx, ry); ctx.stroke();
+    const pan = (x, y, r, color, label) => {
+      ctx.fillStyle = color; ctx.globalAlpha = .9;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
+      ctx.fillStyle = css("--panel"); ctx.font = "600 11px " + css("--font-mono");
+      ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(label, x, y);
+    };
+    pan(lx, ly, 6 + (vb / 500) * 20, css("--bid"), "");
+    pan(rx, ry, 6 + (va / 500) * 20, css("--ask"), "");
+    ctx.fillStyle = css("--faint"); ctx.font = "10px " + css("--font-mono");
+    ctx.textAlign = "left"; ctx.fillText("BID", 4, 14); ctx.textAlign = "right"; ctx.fillText("ASK", w - 4, 14);
+  }
+
+  function drawAxis(micro) {
+    const { ctx, w, h } = fit(axis, 150);
+    ctx.clearRect(0, 0, w, h);
+    const m = 40, y = 74, x0 = m, x1 = w - m;
+    const X = (p) => x0 + (p - P_BID) / (P_ASK - P_BID) * (x1 - x0);
+    ctx.strokeStyle = css("--line"); ctx.lineWidth = 6; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
+    const tick = (p, color, label, up) => {
+      const x = X(p);
+      ctx.strokeStyle = color; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(x, y - 12); ctx.lineTo(x, y + 12); ctx.stroke();
+      ctx.fillStyle = color; ctx.font = "600 11px " + css("--font-mono");
+      ctx.textAlign = "center";
+      ctx.fillText(label, x, up ? y - 20 : y + 26);
+      ctx.fillStyle = css("--muted"); ctx.font = "10px " + css("--font-mono");
+      ctx.fillText(p.toFixed(4).replace(/0+$/, "").replace(/\.$/, ".0"), x, up ? y - 34 : y + 40);
+    };
+    tick(P_BID, css("--bid"), "BID", false);
+    tick(P_ASK, css("--ask"), "ASK", false);
+    tick(MID, css("--faint"), "MID", true);
+    // micro marker (emphasised)
+    const mx = X(micro);
+    ctx.fillStyle = css("--accent");
+    ctx.beginPath(); ctx.moveTo(mx, y - 4); ctx.lineTo(mx - 6, y - 16); ctx.lineTo(mx + 6, y - 16); ctx.closePath(); ctx.fill();
+    ctx.fillRect(mx - 1.5, y - 4, 3, 8);
+    ctx.font = "600 12px " + css("--font-mono"); ctx.textAlign = "center";
+    ctx.fillText("μ", mx, y - 22);
+  }
+
+  vbid.addEventListener("input", calc);
+  vask.addEventListener("input", calc);
+
+  // ── Evidence charts ─────────────────────────────────────────────────────
+  const HORIZ = [[1,52.23],[2,52.22],[5,51.87],[10,51.51],[20,51.00],[50,49.85],[100,49.19]];
+  const DECILE = [49.54,53.63,50.90,52.30,53.52,56.27,57.00,56.88,50.91,41.70];
+
+  function drawHoriz() {
+    const cv = document.getElementById("chart-h");
+    const { ctx, w, h } = fit(cv, 260);
+    ctx.clearRect(0, 0, w, h);
+    const m = { l: 40, r: 14, t: 14, b: 30 };
+    const yMin = 48, yMax = 53;
+    const X = (i) => m.l + i / (HORIZ.length - 1) * (w - m.l - m.r);
+    const Y = (v) => m.t + (yMax - v) / (yMax - yMin) * (h - m.t - m.b);
+    // gridlines + y labels
+    ctx.font = "10px " + css("--font-mono"); ctx.fillStyle = css("--faint");
+    for (let v = 48; v <= 53; v++) {
+      const y = Y(v); ctx.strokeStyle = css("--line"); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(m.l, y); ctx.lineTo(w - m.r, y); ctx.stroke();
+      ctx.textAlign = "right"; ctx.fillText(v + "%", m.l - 6, y + 3);
+    }
+    // 50% baseline
+    ctx.strokeStyle = css("--muted"); ctx.setLineDash([4, 4]); ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(m.l, Y(50)); ctx.lineTo(w - m.r, Y(50)); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.textAlign = "left"; ctx.fillStyle = css("--muted");
+    ctx.fillText("coin-flip 50%", m.l + 4, Y(50) - 5);
+    // area + line
+    ctx.beginPath();
+    HORIZ.forEach((d, i) => { const x = X(i), y = Y(d[1]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.strokeStyle = css("--accent"); ctx.lineWidth = 2.4; ctx.stroke();
+    // points + x labels
+    HORIZ.forEach((d, i) => {
+      const x = X(i), y = Y(d[1]);
+      ctx.fillStyle = d[1] >= 50 ? css("--accent") : css("--ask");
+      ctx.beginPath(); ctx.arc(x, y, 3.4, 0, 7); ctx.fill();
+      ctx.fillStyle = css("--faint"); ctx.textAlign = "center";
+      ctx.fillText("k=" + d[0], x, h - 10);
+    });
+  }
+
+  function drawDecile() {
+    const cv = document.getElementById("chart-d");
+    const { ctx, w, h } = fit(cv, 260);
+    ctx.clearRect(0, 0, w, h);
+    const m = { l: 40, r: 14, t: 14, b: 34 };
+    const yMin = 40, yMax = 58;
+    const bw = (w - m.l - m.r) / DECILE.length;
+    const Y = (v) => m.t + (yMax - v) / (yMax - yMin) * (h - m.t - m.b);
+    ctx.font = "10px " + css("--font-mono");
+    for (let v = 40; v <= 58; v += 6) {
+      const y = Y(v); ctx.strokeStyle = css("--line"); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(m.l, y); ctx.lineTo(w - m.r, y); ctx.stroke();
+      ctx.fillStyle = css("--faint"); ctx.textAlign = "right"; ctx.fillText(v + "%", m.l - 6, y + 3);
+    }
+    DECILE.forEach((v, i) => {
+      const x = m.l + i * bw + 3, y = Y(v), y0 = Y(50);
+      const up = v >= 50;
+      ctx.fillStyle = up ? css("--bid") : css("--ask");
+      ctx.globalAlpha = (i === 6 || i === 9) ? 1 : 0.55;
+      ctx.fillRect(x, Math.min(y, y0), bw - 6, Math.abs(y - y0));
+      ctx.globalAlpha = 1;
+      if (i === 6 || i === 9) {
+        ctx.fillStyle = css("--ink"); ctx.font = "600 10px " + css("--font-mono"); ctx.textAlign = "center";
+        ctx.fillText(v.toFixed(0) + "%", x + (bw - 6) / 2, y - 6);
+      }
+      ctx.fillStyle = css("--faint"); ctx.font = "9px " + css("--font-mono"); ctx.textAlign = "center";
+      ctx.fillText("D" + (i + 1), x + (bw - 6) / 2, h - 12);
+    });
+    // 50 baseline
+    ctx.strokeStyle = css("--muted"); ctx.setLineDash([4, 4]); ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(m.l, Y(50)); ctx.lineTo(w - m.r, Y(50)); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = css("--muted"); ctx.font = "10px " + css("--font-mono"); ctx.textAlign = "left";
+    ctx.fillText("weak → strong tilt", m.l + 2, h - 1);
+  }
+
+  // ── Loop + resize ───────────────────────────────────────────────────────
+  let prev = 0;
+  function loop(t) {
+    const dt = t - prev; prev = t;
+    heroFrame(dt);
+    requestAnimationFrame(loop);
+  }
+  function staticCharts() { calc(); drawHoriz(); drawDecile(); }
+  staticCharts();
+  addEventListener("resize", () => { staticCharts(); if (reduce) { drawLadder(); drawTape(); } });
+  // redraw charts when theme flips
+  new MutationObserver(staticCharts).observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+
+  if (reduce) { for (let i = 0; i < 120; i++) step(); drawLadder(); drawTape(); }
+  else requestAnimationFrame(loop);
+})();
+</script>
