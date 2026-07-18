@@ -1,0 +1,12 @@
+services:
+  dashboard:
+    build: .
+    image: micro-price-lob
+    ports:
+      - "8501:8501"
+    volumes:
+      # Mount ./data so a real FI-2010 lob.bin (if present) is picked up, and
+      # generated CSVs persist across restarts. Nothing here is required —
+      # the synthetic dataset is generated inside the container.
+      - ./data:/app/data
+    restart: unless-stopped

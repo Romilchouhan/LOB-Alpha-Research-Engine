@@ -5,6 +5,7 @@
 #include "trading/simulated_trader.hpp"
 
 #include <cmath>
+#include <cstdint>
 
 namespace trading {
 

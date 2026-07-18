@@ -72,9 +72,32 @@ Hot-path throughput: ~12M ticks/s on Apple M2 (feature compute only).
 
 ---
 
-## Build
+## Quick start (Docker — one command)
 
-Requires CMake 3.22+. Targets Apple Silicon (arm64, `-mcpu=apple-m2`).
+The whole pipeline — build the C++ engine, generate the feature matrix, serve an
+interactive dashboard — in one command. No CMake, no Python setup.
+
+```bash
+docker compose up            # first run builds the image (~2-3 min)
+```
+
+Then open **http://localhost:8501**. The dashboard lets you:
+- zoom a tick range, overlay features (OBI, OFI, realized-vol, depth-imbalance flow),
+- inspect an **information-coefficient (IC) table** — each signal vs forward mid-return,
+  a preview of the Phase-1 study,
+- download the filtered feature matrix as CSV.
+
+A **synthetic** dataset is generated inside the container automatically. To also
+analyse **real FI-2010**, drop the preprocessed binary at `data/lob.bin` (see
+[Data preprocessing](#data-preprocessing)) before `docker compose up` — it is
+picked up via the mounted `./data` volume.
+
+---
+
+## Build (native)
+
+Requires CMake 3.22+. Targets Apple Silicon (arm64, `-mcpu=apple-m2`); builds
+portably elsewhere.
 
 ```bash
 # Minimal build

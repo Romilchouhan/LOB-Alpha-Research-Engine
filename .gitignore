@@ -20,3 +20,6 @@ build*/
 # local planning docs (untracked)
 PLAN.md
 PRODUCTION_ROADMAP.html
+
+# playwright scratch
+.playwright-mcp/
