@@ -1,20 +1,20 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// VPIN — Implementation
+// DepthImbalanceFlow — Implementation
 // ─────────────────────────────────────────────────────────────────────────────
 
-#include "features/vpin.hpp"
+#include "features/depth_imbalance_flow.hpp"
 #include "stats/rmse.hpp"
 
 #include <cmath>
 
 namespace features {
 
-VPIN::VPIN(double bucket_volume, std::size_t window_buckets)
+DepthImbalanceFlow::DepthImbalanceFlow(double bucket_volume, std::size_t window_buckets)
     : bucket_volume_(bucket_volume)
     , window_buckets_(window_buckets)
 {}
 
-double VPIN::update(double volume, double mid_price) {
+double DepthImbalanceFlow::update(double volume, double mid_price) {
     // ── Tick-rule classification ────────────────────────────────────────
     // If mid_price went up since last tick → this volume is "buy-initiated".
     // If mid_price went down → "sell-initiated".
@@ -63,10 +63,10 @@ double VPIN::update(double volume, double mid_price) {
         cur_total_ -= bucket_volume_;
     }
 
-    return current_vpin_;
+    return current_dif_;
 }
 
-void VPIN::flush_bucket_helper(double buy, double sell) {
+void DepthImbalanceFlow::flush_bucket_helper(double buy, double sell) {
     buckets_.push_back({buy, sell});
     if (buckets_.size() > window_buckets_)
         buckets_.pop_front();
@@ -75,28 +75,28 @@ void VPIN::flush_bucket_helper(double buy, double sell) {
         double sum_abs = 0.0;
         for (const auto& b : buckets_)
             sum_abs += std::abs(b.buy - b.sell);
-        current_vpin_ = sum_abs / (static_cast<double>(window_buckets_) * bucket_volume_);
-        history_.push_back(current_vpin_);
+        current_dif_ = sum_abs / (static_cast<double>(window_buckets_) * bucket_volume_);
+        history_.push_back(current_dif_);
     }
 }
 
-double VPIN::percentile(double p) const {
+double DepthImbalanceFlow::percentile(double p) const {
     // Delegate to the shared stats helper — single implementation of the math.
     return stats::percentile(history_, p);
 }
 
-bool VPIN::is_toxic(double p) const {
-    if (std::isnan(current_vpin_) || history_.size() < 10) return false;
-    return current_vpin_ >= percentile(p);
+bool DepthImbalanceFlow::is_elevated(double p) const {
+    if (std::isnan(current_dif_) || history_.size() < 10) return false;
+    return current_dif_ >= percentile(p);
 }
 
-void VPIN::reset() {
+void DepthImbalanceFlow::reset() {
     prev_mid_  = 0.0;
     has_prev_  = false;
     cur_buy_   = 0.0;
     cur_sell_  = 0.0;
     cur_total_ = 0.0;
-    current_vpin_ = std::numeric_limits<double>::quiet_NaN();
+    current_dif_ = std::numeric_limits<double>::quiet_NaN();
     buckets_.clear();
     history_.clear();
 }

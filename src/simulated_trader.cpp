@@ -10,24 +10,24 @@ namespace trading {
 
 SimulatedTrader::SimulatedTrader(const TraderConfig& cfg)
     : cfg_(cfg)
-    , vpin_(cfg.vpin_bucket_vol, cfg.vpin_window)
+    , dif_(cfg.dif_bucket_vol, cfg.dif_window)
 {}
 
 Action SimulatedTrader::on_tick(const lob::LimitOrderBook& book) {
     const double mid   = book.mid_price();
     const double micro = features::MicroPrice::compute(book);
 
-    // Feed the VPIN engine — use BBO volume as a proxy for traded volume
+    // Feed the DepthImbalanceFlow engine — use BBO volume as a proxy for traded volume
     // (FI-2010 is snapshot data; no trade-by-trade feed available).
     const double tick_vol = book.best_ask().volume + book.best_bid().volume;
-    const double vpin_val = vpin_.update(tick_vol, mid);
+    const double dif_val = dif_.update(tick_vol, mid);
 
     const std::uint64_t tick = book.tick_count();
 
     // ── Decision logic ──────────────────────────────────────────────────
 
-    // 1. Check toxicity: ABORT if VPIN exceeds the configured percentile.
-    if (vpin_.is_toxic(cfg_.vpin_toxicity_pct)) {
+    // 1. Check depth-imbalance flow: ABORT if it exceeds the configured percentile.
+    if (dif_.is_elevated(cfg_.dif_elevated_pct)) {
         // If we have a position, flatten it aggressively (mark-to-market close).
         if (std::abs(position_) > 0.0) {
             realised_pnl_ += position_ * (mid - avg_cost_);
@@ -35,7 +35,7 @@ Action SimulatedTrader::on_tick(const lob::LimitOrderBook& book) {
             position_ = 0.0;
         }
         pnl_curve_.push_back(total_pnl(mid));
-        trades_.push_back({tick, mid, 0, total_pnl(mid), position_, vpin_val,
+        trades_.push_back({tick, mid, 0, total_pnl(mid), position_, dif_val,
                            Action::Abort});
         return Action::Abort;
     }
@@ -61,7 +61,7 @@ Action SimulatedTrader::on_tick(const lob::LimitOrderBook& book) {
 
         pnl_curve_.push_back(total_pnl(mid));
         trades_.push_back({tick, fill_px, +1, total_pnl(mid), position_,
-                           vpin_val, Action::PassiveBuy});
+                           dif_val, Action::PassiveBuy});
         return Action::PassiveBuy;
     }
 
@@ -82,13 +82,13 @@ Action SimulatedTrader::on_tick(const lob::LimitOrderBook& book) {
 
         pnl_curve_.push_back(total_pnl(mid));
         trades_.push_back({tick, fill_px, -1, total_pnl(mid), position_,
-                           vpin_val, Action::PassiveSell});
+                           dif_val, Action::PassiveSell});
         return Action::PassiveSell;
     }
 
     // 4. HOLD — no signal
     pnl_curve_.push_back(total_pnl(mid));
-    trades_.push_back({tick, mid, 0, total_pnl(mid), position_, vpin_val,
+    trades_.push_back({tick, mid, 0, total_pnl(mid), position_, dif_val,
                        Action::Hold});
     return Action::Hold;
 }

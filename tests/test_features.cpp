@@ -1,10 +1,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Tests — MicroPrice, OBI, VPIN, stats helpers
+// Tests — MicroPrice, OBI, DepthImbalanceFlow, stats helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
 #include "features/micro_price.hpp"
 #include "features/obi.hpp"
-#include "features/vpin.hpp"
+#include "features/depth_imbalance_flow.hpp"
 #include "lob/fi2010_parser.hpp"
 #include "lob/order_book.hpp"
 #include "stats/rmse.hpp"
@@ -89,61 +89,61 @@ TEST(OrderBookImbalance, Bounds) {
                          make_book(100.0, 0.0, 101.0, 0.0)), 0.0);
 }
 
-// ── VPIN ────────────────────────────────────────────────────────────────────
+// ── DepthImbalanceFlow ────────────────────────────────────────────────────────────────────
 
 TEST(Vpin, BucketAccumulationAndFlush) {
     // bucket_volume = 100, window = 2 buckets.
-    features::VPIN vpin(100.0, 2);
+    features::DepthImbalanceFlow dif(100.0, 2);
 
     // Tick 1 (first tick → 50/50 split): fills bucket 1 = {50 buy, 50 sell}.
-    // Only 1 bucket in window → VPIN still NaN.
-    EXPECT_TRUE(std::isnan(vpin.update(100.0, 10.0)));
+    // Only 1 bucket in window → DepthImbalanceFlow still NaN.
+    EXPECT_TRUE(std::isnan(dif.update(100.0, 10.0)));
 
     // Tick 2 (mid up → all buy): bucket 2 = {100, 0}.
-    // Window full: VPIN = (|50−50| + |100−0|) / (2·100) = 0.5
-    EXPECT_DOUBLE_EQ(vpin.update(100.0, 11.0), 0.5);
-    EXPECT_DOUBLE_EQ(vpin.value(), 0.5);
+    // Window full: DepthImbalanceFlow = (|50−50| + |100−0|) / (2·100) = 0.5
+    EXPECT_DOUBLE_EQ(dif.update(100.0, 11.0), 0.5);
+    EXPECT_DOUBLE_EQ(dif.value(), 0.5);
 
     // Tick 3 (mid down → all sell): bucket 3 = {0, 100}, bucket 1 evicted.
-    // VPIN = (|100−0| + |0−100|) / 200 = 1.0
-    EXPECT_DOUBLE_EQ(vpin.update(100.0, 10.0), 1.0);
+    // DepthImbalanceFlow = (|100−0| + |0−100|) / 200 = 1.0
+    EXPECT_DOUBLE_EQ(dif.update(100.0, 10.0), 1.0);
 
-    EXPECT_EQ(vpin.history().size(), 2u);
+    EXPECT_EQ(dif.history().size(), 2u);
 }
 
 TEST(Vpin, PartialBucketWithOverflowRatio) {
     // bucket_volume = 100, window = 1 bucket.
-    features::VPIN vpin(100.0, 1);
+    features::DepthImbalanceFlow dif(100.0, 1);
 
     // Tick 1: 60 vol, first tick → 30/30. Bucket not full → NaN.
-    EXPECT_TRUE(std::isnan(vpin.update(60.0, 10.0)));
+    EXPECT_TRUE(std::isnan(dif.update(60.0, 10.0)));
 
     // Tick 2: 60 vol, mid up → all buy. Accumulated: buy 90, sell 30, tot 120.
-    // Flush ratio = 100/120 → bucket = {75, 25}; VPIN = |75−25|/100 = 0.5.
+    // Flush ratio = 100/120 → bucket = {75, 25}; DepthImbalanceFlow = |75−25|/100 = 0.5.
     // Remainder {15, 5} carries into the next bucket.
-    EXPECT_DOUBLE_EQ(vpin.update(60.0, 11.0), 0.5);
-    EXPECT_EQ(vpin.history().size(), 1u);
+    EXPECT_DOUBLE_EQ(dif.update(60.0, 11.0), 0.5);
+    EXPECT_EQ(dif.history().size(), 1u);
 }
 
 TEST(Vpin, ResetClearsState) {
-    features::VPIN vpin(100.0, 1);
-    (void)vpin.update(200.0, 10.0);
-    ASSERT_FALSE(vpin.history().empty());
-    vpin.reset();
-    EXPECT_TRUE(vpin.history().empty());
-    EXPECT_TRUE(std::isnan(vpin.value()));
+    features::DepthImbalanceFlow dif(100.0, 1);
+    (void)dif.update(200.0, 10.0);
+    ASSERT_FALSE(dif.history().empty());
+    dif.reset();
+    EXPECT_TRUE(dif.history().empty());
+    EXPECT_TRUE(std::isnan(dif.value()));
 }
 
 TEST(Vpin, PercentileMatchesStatsHelper) {
-    features::VPIN vpin(100.0, 2);
+    features::DepthImbalanceFlow dif(100.0, 2);
     double mid = 10.0;
     for (int i = 0; i < 50; ++i) {
         mid += (i % 3 == 0) ? 0.1 : -0.05;
-        (void)vpin.update(100.0, mid);
+        (void)dif.update(100.0, mid);
     }
-    ASSERT_FALSE(vpin.history().empty());
-    EXPECT_DOUBLE_EQ(vpin.percentile(90.0),
-                     stats::percentile(vpin.history(), 90.0));
+    ASSERT_FALSE(dif.history().empty());
+    EXPECT_DOUBLE_EQ(dif.percentile(90.0),
+                     stats::percentile(dif.history(), 90.0));
 }
 
 // ── stats helpers ───────────────────────────────────────────────────────────

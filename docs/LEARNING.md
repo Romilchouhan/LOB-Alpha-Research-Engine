@@ -29,7 +29,7 @@ Read each paper *next to the header that implements it*.
 |---|---|---|
 | Stoikov (2018), *The Micro-Price* | `include/features/micro_price.hpp` | Read first. The formula is 5 lines; understand why imbalance predicts the next move. |
 | Cont, Kukanov, Stoikov (2014), *The Price Impact of Order Book Events* | `include/features/ofi.hpp` | Core. Hand-derive the 4-term OFI formula; the unit tests' comments walk each case. |
-| Easley, López de Prado, O'Hara (2012), *Flow Toxicity and Liquidity in a High-Frequency World* | `include/features/vpin.hpp` | Read to understand why VPIN **needs trades** — so you can defend why this repo demoted it to a pedagogical footnote. |
+| Easley, López de Prado, O'Hara (2012), *Flow Toxicity and Liquidity in a High-Frequency World* | `include/features/depth_imbalance_flow.hpp` | Read to understand why VPIN **needs trades** — so you can defend why this repo demoted it to a pedagogical footnote. |
 
 Videos: search YouTube **"order flow imbalance explained"** and **"VPIN flow toxicity"** (QuantInsti and university seminar recordings cover both). For micro-price, Stoikov himself has given recorded talks — search **"Stoikov micro-price talk"**.
 

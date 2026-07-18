@@ -1,11 +1,11 @@
 #pragma once
 // ─────────────────────────────────────────────────────────────────────────────
-// SimulatedTrader — Passive Fill + VPIN Toxicity Abort
+// SimulatedTrader — Passive Fill + depth-imbalance-flow abort
 // ─────────────────────────────────────────────────────────────────────────────
 
 #include "features/micro_price.hpp"
 #include "features/obi.hpp"
-#include "features/vpin.hpp"
+#include "features/depth_imbalance_flow.hpp"
 #include "lob/order_book.hpp"
 #include <cstdint>
 #include <vector>
@@ -17,7 +17,7 @@ enum class Action : std::uint8_t {
     Hold,          ///< No signal — do nothing.
     PassiveBuy,    ///< Passive fill at the best bid.
     PassiveSell,   ///< Passive fill at the best ask.
-    Abort          ///< VPIN toxicity abort (position flattened if any).
+    Abort          ///< elevated depth-imbalance-flow abort (position flattened if any).
 };
 
 /// Stable string form of an Action (for logs / CSV export).
@@ -38,17 +38,17 @@ struct TradeRecord {
     int           side;      // +1 buy, −1 sell, 0 none
     double        pnl;       // total (realised + unrealised) P&L after action
     double        position;  // net position after action
-    double        vpin;
+    double        dif;
     Action        action;
 };
 
 /// Configuration knobs for the strategy.
 struct TraderConfig {
     double spread_offset      = 0.0001;   // micro_price threshold over mid + offset
-    double vpin_toxicity_pct  = 90.0;     // percentile threshold for abort
+    double dif_elevated_pct  = 90.0;     // percentile threshold for abort
     double position_limit     = 100.0;    // max absolute position
-    double vpin_bucket_vol    = 1000.0;
-    std::size_t vpin_window   = 50;
+    double dif_bucket_vol    = 1000.0;
+    std::size_t dif_window   = 50;
 };
 
 class SimulatedTrader {
@@ -69,12 +69,12 @@ public:
     [[nodiscard]] const std::vector<TradeRecord>& trades()    const noexcept { return trades_; }
     [[nodiscard]] const std::vector<double>&      pnl_curve() const noexcept { return pnl_curve_; }
 
-    [[nodiscard]] features::VPIN&       vpin_engine() noexcept { return vpin_; }
-    [[nodiscard]] const features::VPIN& vpin_engine() const noexcept { return vpin_; }
+    [[nodiscard]] features::DepthImbalanceFlow&       dif_engine() noexcept { return dif_; }
+    [[nodiscard]] const features::DepthImbalanceFlow& dif_engine() const noexcept { return dif_; }
 
 private:
     TraderConfig          cfg_;
-    features::VPIN        vpin_;
+    features::DepthImbalanceFlow        dif_;
     double                position_     = 0.0;
     double                realised_pnl_ = 0.0;
     double                avg_cost_     = 0.0;

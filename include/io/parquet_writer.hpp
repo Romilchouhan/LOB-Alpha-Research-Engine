@@ -10,7 +10,7 @@
 //
 // Schema (23 columns):
 //   tick (int64), mid, spread, micro_price, obi, ofi, ofi_rolling,
-//   bid_slope, ask_slope, qimb_1..qimb_10, rv_50, rv_200, accel, vpin
+//   bid_slope, ask_slope, qimb_1..qimb_10, rv_50, rv_200, accel, depth_imb_flow
 // ─────────────────────────────────────────────────────────────────────────────
 
 #include "lob/price_level.hpp"
@@ -37,7 +37,7 @@ struct FeatureRow {
     double       rv_50       = 0.0;
     double       rv_200      = 0.0;
     double       accel       = 0.0;
-    double       vpin        = 0.0;
+    double       dif        = 0.0;
 };
 
 class ParquetWriter {
@@ -65,7 +65,7 @@ private:
     std::vector<double> mid_, spread_, micro_price_, obi_, ofi_, ofi_rolling_;
     std::vector<double> bid_slope_, ask_slope_;
     std::array<std::vector<double>, lob::kMaxDepth> qimb_;
-    std::vector<double> rv_50_, rv_200_, accel_, vpin_;
+    std::vector<double> rv_50_, rv_200_, accel_, dif_;
 };
 
 } // namespace io

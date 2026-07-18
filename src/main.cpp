@@ -18,7 +18,7 @@
 #include "features/ofi.hpp"
 #include "features/queue_imbalance.hpp"
 #include "features/realized_vol.hpp"
-#include "features/vpin.hpp"
+#include "features/depth_imbalance_flow.hpp"
 #include "stats/rmse.hpp"
 #include "trading/simulated_trader.hpp"
 
@@ -43,7 +43,7 @@ namespace viz {
 void plot_pnl(const std::vector<double>&, const std::string&);
 void plot_micro_vs_mid(const std::vector<double>&, const std::vector<double>&,
                        const std::string&);
-void plot_vpin(const std::vector<double>&, double, const std::string&);
+void plot_dif(const std::vector<double>&, double, const std::string&);
 }
 
 // ── CLI argument parser ─────────────────────────────────────────────────────
@@ -56,8 +56,8 @@ struct Args {
     bool        synthetic     = false;
     bool        plot          = false;
     double      spread_offset = 0.0001;
-    double      vpin_bucket   = 1000.0;
-    std::size_t vpin_window   = 50;
+    double      dif_bucket   = 1000.0;
+    std::size_t dif_window   = 50;
     std::size_t synthetic_n   = 500;
 };
 
@@ -78,10 +78,10 @@ static Args parse_args(int argc, char* argv[]) {
             a.emit_parquet = argv[++i];
         else if (std::strcmp(argv[i], "--spread-offset") == 0 && i + 1 < argc)
             a.spread_offset = std::stod(argv[++i]);
-        else if (std::strcmp(argv[i], "--vpin-bucket") == 0 && i + 1 < argc)
-            a.vpin_bucket = std::stod(argv[++i]);
-        else if (std::strcmp(argv[i], "--vpin-window") == 0 && i + 1 < argc)
-            a.vpin_window = static_cast<std::size_t>(std::stoul(argv[++i]));
+        else if (std::strcmp(argv[i], "--dif-bucket") == 0 && i + 1 < argc)
+            a.dif_bucket = std::stod(argv[++i]);
+        else if (std::strcmp(argv[i], "--dif-window") == 0 && i + 1 < argc)
+            a.dif_window = static_cast<std::size_t>(std::stoul(argv[++i]));
         else if (std::strcmp(argv[i], "--synthetic-n") == 0 && i + 1 < argc)
             a.synthetic_n = static_cast<std::size_t>(std::stoul(argv[++i]));
         else if (std::strcmp(argv[i], "--help") == 0) {
@@ -95,8 +95,8 @@ static Args parse_args(int argc, char* argv[]) {
                 "  --emit-parquet <p>  Export full feature matrix to Parquet\n"
                 "  --plot              Show Matplotplusplus charts (if compiled)\n"
                 "  --spread-offset <d> Micro-price spread offset (default 0.0001)\n"
-                "  --vpin-bucket <d>   VPIN bucket volume (default 1000)\n"
-                "  --vpin-window <n>   VPIN rolling window buckets (default 50)\n"
+                "  --dif-bucket <d>   DepthImbalanceFlow bucket volume (default 1000)\n"
+                "  --dif-window <n>   DepthImbalanceFlow rolling window buckets (default 50)\n"
                 "  --help              Show this message\n";
             std::exit(0);
         }
@@ -170,8 +170,8 @@ static int run_engine(const Args& args) {
 
     trading::TraderConfig tcfg;
     tcfg.spread_offset     = args.spread_offset;
-    tcfg.vpin_bucket_vol   = args.vpin_bucket;
-    tcfg.vpin_window       = args.vpin_window;
+    tcfg.dif_bucket_vol   = args.dif_bucket;
+    tcfg.dif_window       = args.dif_window;
     trading::SimulatedTrader trader(tcfg);
 
     // Time-series accumulators
@@ -244,7 +244,7 @@ static int run_engine(const Args& args) {
             row.rv_50       = rv50;
             row.rv_200      = rv200;
             row.accel       = accel;
-            row.vpin        = trader.vpin_engine().value();
+            row.dif        = trader.dif_engine().value();
             parquet->append(row);
         }
 #else
@@ -288,7 +288,7 @@ static int run_engine(const Args& args) {
     // ── 5. CSV export ──────────────────────────────────────────────────
     if (!args.dump_csv.empty()) {
         std::ofstream csv(args.dump_csv);
-        csv << "tick,mid_price,micro_price,obi,spread,pnl,position,vpin,action\n";
+        csv << "tick,mid_price,micro_price,obi,spread,pnl,position,depth_imb_flow,action\n";
         const auto& trades = trader.trades();
         for (std::size_t i = 0; i < snapshots.size(); ++i) {
             csv << i
@@ -298,7 +298,7 @@ static int run_engine(const Args& args) {
                 << "," << (snapshots[i].asks[0].price - snapshots[i].bids[0].price)
                 << "," << (i < trades.size() ? trades[i].pnl : 0.0)
                 << "," << (i < trades.size() ? trades[i].position : 0.0)
-                << "," << (i < trades.size() ? trades[i].vpin : 0.0)
+                << "," << (i < trades.size() ? trades[i].dif : 0.0)
                 << "," << (i < trades.size() ? trading::to_string(trades[i].action)
                                              : "")
                 << "\n";
@@ -320,16 +320,16 @@ static int run_engine(const Args& args) {
     // ── 6. RMSE analysis ────────────────────────────────────────────────
     run_rmse_analysis(micro_series, mid_series, {10, 50, 100});
 
-    // ── 7. VPIN summary ─────────────────────────────────────────────────
-    const auto& vpin_hist = trader.vpin_engine().history();
-    if (!vpin_hist.empty()) {
-        std::cout << "\n[VPIN] Observations: " << vpin_hist.size()
+    // ── 7. DepthImbalanceFlow summary ─────────────────────────────────────────────────
+    const auto& dif_hist = trader.dif_engine().history();
+    if (!dif_hist.empty()) {
+        std::cout << "\n[DepthImbalanceFlow] Observations: " << dif_hist.size()
                   << "  |  Mean: " << std::fixed << std::setprecision(6)
-                  << stats::mean(vpin_hist)
+                  << stats::mean(dif_hist)
                   << "  |  90th pct: "
-                  << trader.vpin_engine().percentile(90.0)
+                  << trader.dif_engine().percentile(90.0)
                   << "  |  Max: "
-                  << *std::max_element(vpin_hist.begin(), vpin_hist.end())
+                  << *std::max_element(dif_hist.begin(), dif_hist.end())
                   << "\n";
     }
 
@@ -338,10 +338,10 @@ static int run_engine(const Args& args) {
         viz::plot_pnl(trader.pnl_curve(), "SimulatedTrader PnL");
         viz::plot_micro_vs_mid(micro_series, mid_series,
                                "Micro-Price vs Mid-Price");
-        if (!vpin_hist.empty())
-            viz::plot_vpin(vpin_hist,
-                           trader.vpin_engine().percentile(90.0),
-                           "VPIN Time-Series");
+        if (!dif_hist.empty())
+            viz::plot_dif(dif_hist,
+                           trader.dif_engine().percentile(90.0),
+                           "DepthImbalanceFlow Time-Series");
     }
 
     return 0;
