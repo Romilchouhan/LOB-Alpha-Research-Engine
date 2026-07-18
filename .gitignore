@@ -13,3 +13,10 @@ __pycache__/
 build*/
 .cache/
 .venv/
+
+# understand-anything cache
+.ua/
+
+# local planning docs (untracked)
+PLAN.md
+PRODUCTION_ROADMAP.html

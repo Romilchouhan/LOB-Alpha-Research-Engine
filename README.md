@@ -1,208 +1,176 @@
-# LOB Alpha Research Engine — FI-2010
+# Micro-Price-LOB — LOB Feature Engineering & Prediction Study (FI-2010)
 
-> **A C++20 HFT research engine for Limit Order Book alpha generation,
-> built on the FI-2010 benchmark dataset and optimised for Apple Silicon.**
+> A **C++20 feature-engineering pipeline** benchmarking limit-order-book
+> mid-price-direction prediction on the **FI-2010** benchmark dataset:
+> hand-crafted microstructure features vs. DeepLOB baselines, with a
+> deterministic C++ hot path exporting a Parquet feature matrix into a
+> Python research layer for walk-forward validation, ablation, and
+> block-bootstrap confidence intervals.
 
 ---
 
-## Front-Office Use Case
+## What this is / what it deliberately does NOT claim
 
-In a modern electronic market-making desk, the ability to estimate the
-**true price** of an instrument — milliseconds before the rest of the market
-converges — is the single most valuable edge.
+This repo started as an "HFT engine" and was deliberately **reframed** after an
+honest microstructure audit. The self-critique is the point — read it first.
 
-This engine implements the **Stoikov Micro-Price** estimator, which
-weights the mid-price by the volume imbalance at the best bid/ask.
-When `micro_price > mid_price + ε`, the engine signals that the fair
-value has shifted upward, and a **passive limit buy** at the bid is
-likely to get filled and immediately be in-the-money.
+**What it is:**
+- A correctness-tested C++20 pipeline that parses FI-2010 L2 snapshots and
+  computes microstructure features on a fast, look-ahead-safe hot path.
+- An exporter to a **Parquet/Arrow feature matrix** for downstream ML research.
+- A research harness for measuring whether those features **predict** anything
+  (Phase 1, in progress).
 
-Simultaneously, the engine monitors market **toxicity** via
-**VPIN** (Volume-Synchronized Probability of Informed Trading).
-When toxic flow exceeds the 90th percentile of its historical
-distribution, the engine **aborts** all new orders and flattens
-existing inventory to avoid adverse selection.
+**What it deliberately does NOT claim:**
+- ❌ **Not a trading engine, and no tradable PnL.** There is no queue model, no
+  fill probability, no fees, no latency. The bundled `SimulatedTrader` crosses
+  the spread on "fills" — its PnL is a meaningless unit and is not a result.
+- ❌ **No VPIN toxicity signal.** FI-2010 is L2 snapshots with **no trade prints**.
+  VPIN needs executed trades; fed snapshot volume it is mis-specified. The math is
+  retained as a depth-imbalance feature (`DepthImbalanceFlow`) with the
+  toxicity claim dropped.
+- ❌ **Not production / distributed / co-located.** Single-process research harness.
+  (The old Hazelcast layer was removed as cargo-cult architecture.)
 
-| Signal            | Condition                                   | Action        |
-|-------------------|---------------------------------------------|---------------|
-| Micro-Price Alpha | `μ > mid + spread_offset`                   | Passive Fill  |
-| Toxicity Abort    | `VPIN > 90th-percentile`                    | Flatten + Hold|
-| Neutral           | Neither condition met                       | Hold          |
+> The one honest predictive number today is the **micro-price vs. mid RMSE by
+> horizon** below. Phase 1 replaces it with proper directional metrics (IC,
+> rank-IC, hit rate, AUC on the canonical 3-class label).
 
-This is the exact decision framework used on real FI desks — the
-difference being that production systems operate on co-located hardware
-with sub-microsecond latencies. This engine is the **research harness**
-that validates the signal *before* it gets promoted to production.
+---
+
+## Current results (honest baseline)
+
+Micro-price (Stoikov) vs. realized mid, RMSE by forward horizon, FI-2010
+(362,400 snapshots, decimal-precision binary):
+
+| Horizon (ticks) | RMSE     |
+|-----------------|----------|
+| 10              | 0.01361  |
+| 50              | 0.03047  |
+| 100             | 0.04311  |
+
+Hot-path throughput: ~12M ticks/s on Apple M2 (feature compute only).
+
+> ⚠️ RMSE here is dominated by price drift, not signal — it is a smoke test, not a
+> predictive claim. Phase 1 replaces it with an IC/rank-IC analysis that
+> actually measures prediction.
+
+---
+
+## Features (C++ hot path)
+
+| Feature                | File                                | Well-defined on L2? |
+|------------------------|-------------------------------------|---------------------|
+| Micro-price (Stoikov)  | `include/features/micro_price.hpp`  | ✅ |
+| Order-book imbalance   | `include/features/obi.hpp`          | ✅ |
+| Order-flow imbalance   | `include/features/ofi.hpp`          | ✅ (Cont-Kukanov-Stoikov 2014) |
+| Queue imbalance        | `include/features/queue_imbalance.hpp` | ✅ |
+| Book slope             | `include/features/book_slope.hpp`   | ✅ |
+| Realized volatility    | `include/features/realized_vol.hpp` | ✅ |
+| Price acceleration     | `include/features/accel.hpp`        | ✅ |
+| Depth-imbalance flow   | `include/features/depth_imbalance_flow.hpp` | ⚠️ depth proxy, **not** VPIN toxicity |
+
+---
+
+## Build
+
+Requires CMake 3.22+. Targets Apple Silicon (arm64, `-mcpu=apple-m2`).
+
+```bash
+# Minimal build
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j$(sysctl -n hw.ncpu)
+
+# With optional features
+cmake -B build -DCMAKE_BUILD_TYPE=Release \
+      -DLOB_ENABLE_BOOST=ON \
+      -DLOB_ENABLE_PLOTTING=ON
+cmake --build build -j$(sysctl -n hw.ncpu)
+```
+
+Optional flags (default OFF, fetched via FetchContent): `LOB_ENABLE_BOOST`
+(Boost.Accumulators), `LOB_ENABLE_PLOTTING` (Matplot++).
+
+### Tests
+
+32 GoogleTest cases (LOB invariants, micro-price zero-volume edge cases,
+OFI/feature correctness).
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j$(sysctl -n hw.ncpu)
+ctest --test-dir build --output-on-failure
+```
+
+---
+
+## Run
+
+```bash
+# Synthetic data — no files needed
+./build/lob_engine --synthetic --synthetic-n 5000
+
+# From pre-processed binary
+./build/lob_engine --file data/lob.bin
+
+# From raw FI-2010 CSV
+./build/lob_engine --csv data/FI-2010.csv
+
+# Export a tick-level CSV for Python visualization
+./build/lob_engine --file data/lob.bin --dump-csv data/results.csv
+
+# Export the Parquet feature matrix for the research layer
+./build/lob_engine --file data/lob.bin --emit-parquet data/features.parquet
+```
+
+Tunables: `--spread-offset` (0.0001), `--synthetic-n <n>`.
+
+### Data preprocessing
+
+```bash
+# Convert FI-2010 CSV → binary (run once)
+python3 scripts/preprocess.py --input data/FI-2010.csv --output data/lob.bin --stats
+
+# Python visualization
+python3 scripts/visualize.py --input data/results.csv --output plots/fi2010/ --dark
+```
 
 ---
 
 ## Architecture
 
 ```
-                     ┌─────────────────────────────────────────────┐
-                     │              main.cpp  (Orchestrator)       │
-                     │                                             │
-  CSV / Binary ──►   │  FI2010Parser  ──►  LimitOrderBook          │
-                     │       │                    │                │
-                     │       ▼                    ▼                │
-                     │  MicroPrice    OBI    VPIN                  │
-                     │       │         │      │                    │
-                     │       └────┬────┘      │                    │
-                     │            ▼           ▼                    │
-                     │      SimulatedTrader                        │
-                     │       │           │                         │
-                     │       ▼           ▼                         │
-                     │  Trade_Signals  Inventory_Risk  ──► Hazelcast│
-                     │       │                                     │
-                     │       ▼                                     │
-                     │  RMSE Analysis  ──►  Console / Matplot      │
-                     └─────────────────────────────────────────────┘
+Input (CSV / binary / synthetic)
+  → FI2010Parser        parses 40-col snapshots (10 bid + 10 ask levels)
+  → LimitOrderBook      current 10-level depth snapshot
+  → Feature extraction  micro-price, OBI, OFI, queue-imbalance, book-slope,
+                        realized-vol, accel, depth-imbalance-flow
+  → Parquet feature matrix  (Arrow) → Python research layer
+  → RMSE smoke test / optional plots
 ```
+
+## Key algorithms
+
+**Micro-price (Stoikov 2018)**
+```
+μ = P_ask · (V_bid / (V_bid + V_ask))  +  P_bid · (V_ask / (V_bid + V_ask))
+```
+
+**Order-book imbalance**
+```
+OBI = (Σ V_bid − Σ V_ask) / (Σ V_bid + Σ V_ask)   ∈ [−1, +1]
+```
+
+**Order-flow imbalance (Cont, Kukanov & Stoikov 2014)** — the L2-correct
+replacement for VPIN; computed from best-level changes across consecutive
+snapshots.
 
 ---
 
-## Quick Start
+## Roadmap
 
-### 1. Environment Setup
-
-The engine optional features (Hazelcast, Plotting) require specific external services or libraries.
-
-**Docker & Hazelcast**
-Hazelcast is used for distributed storage of trade signals and risk metrics.
-```bash
-# Start Docker (macOS)
-open -a Docker
-
-# Run Hazelcast instance
-docker run -d --name hazelcast -p 5701:5701 hazelcast/hazelcast
-
-# Run Hazelcast Management Center (UI for monitoring)
-# Access at http://localhost:8080
-docker run -d --name hz-mc -p 8080:8080 hazelcast/management-center
-
-# Hazelcast Cluster Definition
-# Default Name: dev
-# Default Port: 5701
-# Verification: docker logs hazelcast | grep "Cluster Name"
-```
-
-**System Dependencies (macOS)**
-```bash
-brew install cmake boost
-```
-
-### 2. Build the Engine
-
-The engine supports multiple build modes. Enabling optional features will automatically fetch dependencies via `FetchContent`.
-
-| Feature | CMake Flag | Description |
-| :--- | :--- | :--- |
-| **Minimal** | (Default) | Core LOB logic only. |
-| **Boost** | `-DLOB_ENABLE_BOOST=ON` | Uses Boost.Accumulators for high-precision stats. |
-| **Hazelcast** | `-DLOB_ENABLE_HAZELCAST=ON` | Enables distributed signal/risk emission. |
-| **Plotting** | `-DLOB_ENABLE_PLOTTING=ON` | Enables inline C++ plotting via Matplotplusplus. |
-
-**Standard Build (Recommended)**
-```bash
-# Configure with all features enabled
-cmake -B build -DCMAKE_BUILD_TYPE=Release \
-      -DLOB_ENABLE_BOOST=ON \
-      -DLOB_ENABLE_HAZELCAST=ON \
-      -DLOB_ENABLE_PLOTTING=ON
-
-# Build using all CPU cores
-cmake --build build -j$(sysctl -n hw.ncpu)
-```
-
-### 3. Run and Generate Plots
-
-#### Preprocess Data
-Download the FI-2010 dataset and convert it to the optimized binary format:
-```bash
-python3 scripts/preprocess.py --input data/FI-2010.csv --output data/lob.bin --stats
-```
-
-#### Run Engine
-```bash
-# Run with Hazelcast & Real-time Plotting (if enabled in build)
-./build/lob_engine --file data/lob.bin --hazelcast --plot
-
-# Generate CSV data for advanced Python visualization
-./build/lob_engine --file data/lob.bin --dump-csv data/results.csv
-```
-
-#### Advanced Visualizations
-Use the Python suite for high-fidelity research charts:
-```bash
-# Generate dashboard, pnl, and alpha plots
-python3 scripts/visualize.py --input data/results.csv --output plots/fi2010/ --dark
-```
-
-| Plot Type | Description |
-|-----------|-------------|
-| **Dashboard** | 4-panel overview (Price, OBI, PnL, VPIN) |
-| **Micro-vs-Mid** | Stoikov estimator vs standard mid-price |
-| **PnL Curve** | Strategy returns with toxicity abort markers |
-| **VPIN** | Real-time toxic flow detection |
-
----
-
-## Project Structure
-
-```
-Micro-Price-LOB/
-├── CMakeLists.txt           # Build system (C++20, Apple M2)
-├── README.md                # Research engine overview
-├── plots/                   # Stored visualizations (Synthetic & FI-2010)
-│   ├── synthetic/           # Test run charts
-│   └── fi2010/              # Research benchmark charts
-├── include/
-│   ├── features/
-│   │   ├── micro_price.hpp   # Stoikov estimator
-│   │   ├── obi.hpp           # Order Book Imbalance
-│   │   └── vpin.hpp          # VPIN monitor
-│   ├── infra/
-│   │   └── hazelcast_store.hpp
-│   ├── lob/
-│   │   ├── fi2010_parser.hpp # CSV/Binary engine
-│   │   ├── order_book.hpp    # LOB data container
-│   │   └── price_level.hpp
-│   ├── stats/
-│   │   └── rmse.hpp          # Predictive accuracy
-│   └── trading/
-│       └── simulated_trader.hpp
-├── scripts/
-│   ├── preprocess.py        # FI-2010 data cleaner
-│   └── visualize.py         # Advanced plot generator
-└── src/
-    ├── fi2010_parser.cpp     # Data engine implementation
-    ├── hazelcast_store.cpp   # Distributed client logic
-    ├── main.cpp              # Orchestrator
-    ├── simulated_trader.cpp  # Strategy logic
-    ├── visualization.cpp     # C++ plotting wrappers
-    └── vpin.cpp              # Toxicity detector
-```
-
----
-
-## Key Algorithms
-
-### Micro-Price (Stoikov 2018)
-
-```
-μ = P_ask × (V_bid / (V_bid + V_ask))  +  P_bid × (V_ask / (V_bid + V_ask))
-```
-
-### Order Book Imbalance
-
-```
-OBI = (Σ V_bid − Σ V_ask) / (Σ V_bid + Σ V_ask)     ∈ [−1, +1]
-```
-
-### VPIN (Easley, López de Prado & O'Hara 2012)
-
-```
-VPIN = Σ|V_buy(n) − V_sell(n)| / (N × V_bucket)
-```
-
-Volume classification uses the **tick rule** on mid-price direction.
+Phase 0 (honesty pass) done; Phase 1 builds the defensible
+research layer (canonical Day 1-7/8-10 split, 3-class labels, IC-decay curve,
+LogReg + LightGBM baselines vs. published DeepLOB, block-bootstrap CIs +
+leave-one-feature-out ablation). Phase 2 is an LLM analyst agent that drives the
+engine as a tool backend, with an eval harness.

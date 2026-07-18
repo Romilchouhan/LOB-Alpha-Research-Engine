@@ -71,7 +71,7 @@ void ParquetWriter::append(const FeatureRow& row) {
     rv_50_.push_back(row.rv_50);
     rv_200_.push_back(row.rv_200);
     accel_.push_back(row.accel);
-    vpin_.push_back(row.vpin);
+    dif_.push_back(row.dif);
 }
 
 void ParquetWriter::finalize() {
@@ -105,7 +105,7 @@ void ParquetWriter::finalize() {
     add_dbl("rv_50", rv_50_);
     add_dbl("rv_200", rv_200_);
     add_dbl("accel", accel_);
-    add_dbl("vpin", vpin_);
+    add_dbl("depth_imb_flow", dif_);
 
     const auto schema = std::make_shared<arrow::Schema>(fields);
     const auto table  = arrow::Table::Make(schema, arrays,

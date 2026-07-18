@@ -32,7 +32,7 @@ COLORS_LIGHT = {
     "micro":    "#e74c3c",
     "pnl_pos":  "#27ae60",
     "pnl_neg":  "#e74c3c",
-    "vpin":     "#8e44ad",
+    "depth_imb_flow":     "#8e44ad",
     "thresh":   "#e74c3c",
     "obi_pos":  "#2ecc71",
     "obi_neg":  "#e67e22",
@@ -50,7 +50,7 @@ COLORS_DARK = {
     "micro":    "#f97583",
     "pnl_pos":  "#3fb950",
     "pnl_neg":  "#f85149",
-    "vpin":     "#bc8cff",
+    "depth_imb_flow":     "#bc8cff",
     "thresh":   "#f85149",
     "obi_pos":  "#3fb950",
     "obi_neg":  "#d29922",
@@ -145,7 +145,7 @@ def plot_pnl(df: pd.DataFrame, c: dict, out: Path):
                    label=f"ABORT ({len(aborts)})", alpha=0.8)
 
     ax.axhline(0, color=c["text"], linewidth=0.5, alpha=0.5)
-    ax.set_title("Strategy PnL — Passive Fill with VPIN Abort", fontweight="bold")
+    ax.set_title("SimulatedTrader PnL — NOT tradable (no fill/queue/cost model)", fontweight="bold")
     ax.set_xlabel("Tick")
     ax.set_ylabel("Cumulative PnL")
     ax.legend(loc="upper left", framealpha=0.7)
@@ -167,43 +167,47 @@ def plot_pnl(df: pd.DataFrame, c: dict, out: Path):
     print(f"  ✓ pnl_curve.png")
 
 
-def plot_vpin(df: pd.DataFrame, c: dict, out: Path):
-    """Plot 3: VPIN time-series with toxicity threshold."""
-    vpin = df["vpin"].values
-    # Filter out zeros (VPIN is NaN/0 before warm-up)
-    valid = vpin > 0
+def plot_dif(df: pd.DataFrame, c: dict, out: Path):
+    """Plot 3: depth-imbalance-flow time-series with 90th-pct band.
+
+    NOTE: this is the VPIN bucket formula repurposed as a plain feature.
+    FI-2010 has no trade prints, so it is NOT a flow-toxicity signal.
+    """
+    dif = df["depth_imb_flow"].values
+    # Filter out zeros (value is NaN/0 before warm-up)
+    valid = dif > 0
     if valid.sum() < 10:
-        print("  ⚠ Not enough VPIN data for plot")
+        print("  ⚠ Not enough depth-imbalance-flow data for plot")
         return
 
     fig, ax = plt.subplots(figsize=(14, 5))
     t = df["tick"].values
 
-    ax.plot(t[valid], vpin[valid], color=c["vpin"], linewidth=1.0, alpha=0.8,
-            label="VPIN")
+    ax.plot(t[valid], dif[valid], color=c["depth_imb_flow"], linewidth=1.0, alpha=0.8,
+            label="Depth-imbalance flow")
 
-    # 90th percentile threshold
-    p90 = np.percentile(vpin[valid], 90)
+    # 90th percentile band
+    p90 = np.percentile(dif[valid], 90)
     ax.axhline(p90, color=c["thresh"], linewidth=1.5, linestyle="--",
                alpha=0.8, label=f"90th Pct ({p90:.4f})")
 
-    # Shade toxic regions
-    toxic = valid & (vpin >= p90)
-    ax.fill_between(t, 0, vpin, where=toxic,
-                    color=c["thresh"], alpha=0.2, label="Toxic Region")
+    # Shade elevated regions
+    elevated = valid & (dif >= p90)
+    ax.fill_between(t, 0, dif, where=elevated,
+                    color=c["thresh"], alpha=0.2, label="Elevated")
 
-    ax.set_title("VPIN — Volume-Synchronized Probability of Informed Trading",
+    ax.set_title("Depth-imbalance flow (VPIN formula, repurposed as a feature — not toxicity)",
                  fontweight="bold")
     ax.set_xlabel("Tick")
-    ax.set_ylabel("VPIN")
+    ax.set_ylabel("Depth-imbalance flow")
     ax.legend(loc="upper right", framealpha=0.7)
     ax.grid(True, alpha=0.3)
     ax.set_ylim(bottom=0)
 
     plt.tight_layout()
-    fig.savefig(out / "vpin_timeseries.png")
+    fig.savefig(out / "dif_timeseries.png")
     plt.close()
-    print(f"  ✓ vpin_timeseries.png")
+    print(f"  ✓ dif_timeseries.png")
 
 
 def plot_obi(df: pd.DataFrame, c: dict, out: Path):
@@ -235,7 +239,7 @@ def plot_obi(df: pd.DataFrame, c: dict, out: Path):
 def plot_dashboard(df: pd.DataFrame, c: dict, out: Path):
     """Plot 5: Combined 4-panel research dashboard."""
     fig = plt.figure(figsize=(18, 14))
-    fig.suptitle("LOB Alpha Research Engine — FI-2010 Dashboard",
+    fig.suptitle("Micro-Price-LOB — FI-2010 Feature Dashboard",
                  fontsize=20, fontweight="bold", y=0.98)
     gs = gridspec.GridSpec(3, 2, hspace=0.35, wspace=0.25)
 
@@ -244,7 +248,7 @@ def plot_dashboard(df: pd.DataFrame, c: dict, out: Path):
     micro = df["micro_price"].values
     obi = df["obi"].values
     pnl = df["pnl"].values
-    vpin = df["vpin"].values
+    dif = df["depth_imb_flow"].values
 
     # Panel 1: Micro vs Mid (top-left)
     ax1 = fig.add_subplot(gs[0, 0])
@@ -273,24 +277,24 @@ def plot_dashboard(df: pd.DataFrame, c: dict, out: Path):
         ax3.scatter(aborts["tick"], aborts["pnl"],
                     color=c["abort"], marker="x", s=30, zorder=5, label="ABORT")
     ax3.axhline(0, color=c["text"], linewidth=0.5, alpha=0.3)
-    ax3.set_title(f"Strategy PnL  (Final: {pnl[-1]:+.4f})")
-    ax3.set_ylabel("PnL")
+    ax3.set_title(f"SimulatedTrader PnL — NOT tradable (no fill/queue/cost model)  (Final: {pnl[-1]:+.4f})")
+    ax3.set_ylabel("PnL (arbitrary units)")
     ax3.legend(loc="upper left", fontsize=9)
     ax3.grid(True, alpha=0.3)
 
-    # Panel 4: VPIN (bottom, full width)
-    valid = vpin > 0
+    # Panel 4: depth-imbalance flow (bottom, full width)
+    valid = dif > 0
     ax4 = fig.add_subplot(gs[2, :])
     if valid.sum() > 10:
-        ax4.plot(t[valid], vpin[valid], color=c["vpin"], linewidth=0.8, alpha=0.8)
-        p90 = np.percentile(vpin[valid], 90)
+        ax4.plot(t[valid], dif[valid], color=c["depth_imb_flow"], linewidth=0.8, alpha=0.8)
+        p90 = np.percentile(dif[valid], 90)
         ax4.axhline(p90, color=c["thresh"], linewidth=1.2, linestyle="--", alpha=0.7,
                     label=f"90th Pct ({p90:.4f})")
-        toxic = valid & (vpin >= p90)
-        ax4.fill_between(t, 0, vpin, where=toxic, color=c["thresh"], alpha=0.15)
-    ax4.set_title("VPIN — Toxic Flow Detection")
+        elevated = valid & (dif >= p90)
+        ax4.fill_between(t, 0, dif, where=elevated, color=c["thresh"], alpha=0.15)
+    ax4.set_title("Depth-imbalance flow (feature, not toxicity)")
     ax4.set_xlabel("Tick")
-    ax4.set_ylabel("VPIN")
+    ax4.set_ylabel("Depth-imbalance flow")
     ax4.legend(loc="upper right", fontsize=9)
     ax4.grid(True, alpha=0.3)
     ax4.set_ylim(bottom=0)
@@ -317,13 +321,16 @@ def main():
 
     print(f"\n[visualize] Generating plots ({len(df)} ticks) → {out}/\n")
 
+    # NOTE: plot_pnl() is intentionally NOT called by default. The bundled
+    # SimulatedTrader crosses the spread and has no fill/queue/cost model, so
+    # its PnL curve is a meaningless unit and must not read as a result.
     plot_micro_vs_mid(df, c, out)
-    plot_pnl(df, c, out)
-    plot_vpin(df, c, out)
+    plot_dif(df, c, out)
     plot_obi(df, c, out)
     plot_dashboard(df, c, out)
 
-    print(f"\n[visualize] Done — 5 plots saved to {out}/\n")
+    n = len(list(out.glob("*.png")))
+    print(f"\n[visualize] Done — {n} plots saved to {out}/\n")
 
 
 if __name__ == "__main__":

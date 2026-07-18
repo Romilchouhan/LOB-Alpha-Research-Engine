@@ -61,32 +61,32 @@ void plot_micro_vs_mid(const std::vector<double>& micro,
 #endif
 }
 
-void plot_vpin(const std::vector<double>& vpin_series,
+void plot_dif(const std::vector<double>& dif_series,
                double threshold,
-               const std::string& title = "VPIN Time-Series") {
+               const std::string& title = "DepthImbalanceFlow Time-Series") {
 #if defined(LOB_HAS_MATPLOT) && LOB_HAS_MATPLOT
     using namespace matplot;
     auto f = figure(true);
     f->size(1200, 600);
     hold(on);
-    auto p1 = plot(vpin_series);
-    p1->display_name("VPIN");
+    auto p1 = plot(dif_series);
+    p1->display_name("DepthImbalanceFlow");
     p1->line_width(1.2);
-    auto p2 = plot(std::vector<double>(vpin_series.size(), threshold));
+    auto p2 = plot(std::vector<double>(dif_series.size(), threshold));
     p2->display_name("90th Percentile");
     p2->line_width(1.0).color("r").line_style("--");
     hold(off);
     matplot::title(title);
     xlabel("Bucket");
-    ylabel("VPIN");
+    ylabel("DepthImbalanceFlow");
     legend();
     grid(true);
     show();
 #else
     (void)threshold;
     (void)title;
-    std::cout << "[Viz] Matplotplusplus not enabled. VPIN points: "
-              << vpin_series.size() << "\n";
+    std::cout << "[Viz] Matplotplusplus not enabled. DepthImbalanceFlow points: "
+              << dif_series.size() << "\n";
 #endif
 }
 

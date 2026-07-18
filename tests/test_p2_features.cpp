@@ -252,7 +252,7 @@ TEST(Parquet, RoundTrip) {
                                   : 0.001 * t;
             row.rv_200 = std::numeric_limits<double>::quiet_NaN();
             row.accel  = -1.0 + t;
-            row.vpin   = 0.4;
+            row.dif   = 0.4;
             w.append(row);
         }
         ASSERT_EQ(w.rows(), 3u);
@@ -298,7 +298,7 @@ TEST(Parquet, RoundTrip) {
     EXPECT_TRUE(std::isnan(col_double("rv_50", 0)));      // warm-up NaN survives
     EXPECT_DOUBLE_EQ(col_double("rv_50", 2), 0.002);
     EXPECT_DOUBLE_EQ(col_double("accel", 0), -1.0);
-    EXPECT_DOUBLE_EQ(col_double("vpin", 2), 0.4);
+    EXPECT_DOUBLE_EQ(col_double("depth_imb_flow", 2), 0.4);
 
     std::filesystem::remove(path);
 #endif

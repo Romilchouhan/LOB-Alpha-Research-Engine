@@ -51,7 +51,7 @@ endif()
 # ── Core library (shared between the engine and the test suite) ─────────────
 add_library(lob_core STATIC
     src/fi2010_parser.cpp
-    src/vpin.cpp
+    src/depth_imbalance_flow.cpp
     src/simulated_trader.cpp
 )
 target_include_directories(lob_core PUBLIC ${CMAKE_SOURCE_DIR}/include)
