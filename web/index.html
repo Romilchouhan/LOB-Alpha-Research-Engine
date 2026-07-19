@@ -227,14 +227,14 @@
       <div class="chips">
         <span class="chip"><b>Stoikov</b> volume-weighted fair value</span>
         <span class="chip">C++20 hot path · <b>12M ticks/s</b></span>
-        <span class="chip">FI-2010 · <b>362,400</b> snapshots</span>
+        <span class="chip">FI-2010 · <b id="chip-n">362,400</b> snapshots</span>
       </div>
     </div>
 
     <div class="panel board">
       <div class="board-top">
-        <span class="ttl">Live book · illustrative</span>
-        <span class="live"><span class="pulse"></span>STREAMING</span>
+        <span class="ttl" id="board-ttl">Live book · illustrative</span>
+        <span class="live"><span class="pulse"></span><span id="board-tag">STREAMING</span></span>
       </div>
       <div class="board-body">
         <canvas id="ladder" height="240" aria-label="Animated order-book depth ladder"></canvas>
@@ -246,8 +246,8 @@
         <div class="ro"><div class="k">Tilt</div><div class="v tilt num" id="ro-tilt">—</div></div>
       </div>
       <div class="legend" style="padding:12px 6px 4px">
-        <span><i style="background:var(--ink)"></i>mid</span>
-        <span><i style="background:var(--accent)"></i>micro-price</span>
+        <span><i style="background:var(--ink)"></i>mid price</span>
+        <span><i style="background:var(--accent)"></i>micro − mid (bp)</span>
         <span><i style="background:var(--bid)"></i>bid depth</span>
         <span><i style="background:var(--ask)"></i>ask depth</span>
       </div>
@@ -320,10 +320,10 @@
         The result is real, and it is <i>not</i> a fairy tale.</p>
     </div>
     <div class="stats">
-      <div class="stat acc panel"><div class="n num">52.2%</div><div class="l">tilt predicts next-tick direction (vs 50% coin-flip)</div></div>
-      <div class="stat good panel"><div class="n num">57.0%</div><div class="l">hit-rate at <i>moderate</i> tilt — the signal's sweet spot</div></div>
-      <div class="stat bad panel"><div class="n num">41.7%</div><div class="l">hit-rate at <i>extreme</i> tilt — it reverses (bid-ask bounce)</div></div>
-      <div class="stat panel"><div class="n num acc" style="color:var(--muted)">~30</div><div class="l">ticks until the edge decays to noise</div></div>
+      <div class="stat acc panel"><div class="n num" id="st-nexttick">52.2%</div><div class="l">tilt predicts next-tick direction (vs 50% coin-flip)</div></div>
+      <div class="stat good panel"><div class="n num" id="st-best">57.0%</div><div class="l">hit-rate at <i>moderate</i> tilt — the signal's sweet spot</div></div>
+      <div class="stat bad panel"><div class="n num" id="st-worst">41.7%</div><div class="l">hit-rate at <i>extreme</i> tilt — it reverses (bid-ask bounce)</div></div>
+      <div class="stat panel"><div class="n num acc" id="st-decay" style="color:var(--muted)">~50</div><div class="l">ticks until the edge decays to a coin-flip</div></div>
     </div>
   </div>
 </section>
@@ -355,6 +355,12 @@
         <figcaption>hit-rate by |micro − mid| decile · next-tick</figcaption>
       </figure>
     </div>
+
+    <p class="prov mono" id="prov" style="margin-top:18px;font-size:12.5px;color:var(--faint)">
+      Numbers computed live from <b id="prov-n" style="color:var(--muted)">362,400</b> real FI-2010 ticks
+      (<code>data/fi2010.csv</code>) — reproduce with <code>scripts/compute_signal_stats.py</code>.
+      <span id="prov-src"></span>
+    </p>
 
     <div class="callout" style="margin-top:24px">
       <h3>What this is not</h3>
@@ -420,6 +426,9 @@
   const hist = [];               // {mid, micro}
   const LEVELS = 8;
   let bidSz = [], askSz = [];
+  // Real FI-2010 replay: when signal_stats.json loads, the hero animates
+  // recorded mid/micro instead of a random walk. rp = {mid[], micro[]}.
+  let rp = null, rpi = 0;
   function reseed() {
     bidSz = []; askSz = [];
     for (let i = 0; i < LEVELS; i++) {
@@ -430,7 +439,24 @@
   reseed();
 
   function step() {
-    // jitter best-level sizes to create shifting imbalance
+    if (rp) {
+      // ── Real replay: read the next recorded (mid, micro) pair. ──
+      const mid = rp.mid[rpi], micro = rp.micro[rpi];
+      rpi = (rpi + 1) % rp.mid.length;
+      // Drive the depth ladder from the actual tilt sign so the book leans the
+      // way the data says (schematic depth — this dump carries no L2 sizes).
+      const tilt = micro - mid;
+      const base = 90, skew = Math.max(-0.9, Math.min(0.9, tilt / (mid * 4e-4 || 1)));
+      for (let i = 0; i < LEVELS; i++) {
+        const fall = 1 - i / (LEVELS + 2);
+        bidSz[i] = Math.max(8, base * (1 + skew) * fall + (bidSz[i] || base) * 0.35);
+        askSz[i] = Math.max(8, base * (1 - skew) * fall + (askSz[i] || base) * 0.35);
+      }
+      hist.push({ mid, micro });
+      if (hist.length > 160) hist.shift();
+      return { mid, micro, vb: bidSz[0], va: askSz[0] };
+    }
+    // ── Fallback synthetic walk (no data / file:// / artifact). ──
     for (let i = 0; i < LEVELS; i++) {
       bidSz[i] = Math.max(8, bidSz[i] + (Math.random() - 0.5) * 26);
       askSz[i] = Math.max(8, askSz[i] + (Math.random() - 0.5) * 26);
@@ -439,7 +465,6 @@
     const vb = bidSz[0], va = askSz[0];
     const micro = bestAsk * (vb / (vb + va)) + bestBid * (va / (vb + va));
     const mid = (bestBid + bestAsk) / 2;
-    // mechanism illustration: fair value drifts toward the micro lean, plus noise
     const lean = (micro - mid);
     fair += lean * 0.55 + (Math.random() - 0.5) * TICK * 1.1;
     hist.push({ mid, micro });
@@ -481,29 +506,50 @@
     ctx.beginPath(); ctx.moveTo(0, midY); ctx.lineTo(w, midY); ctx.stroke();
   }
 
+  // Two stacked panels: mid PRICE on top, micro−mid SIGNAL (bp) below. On real
+  // FI-2010 the signal is a fraction of a tick — far smaller than the price
+  // moves — so overlaying two price lines just draws them on top of each other.
+  // Splitting scales each to its own range, so the actual lead is visible.
   function drawTape() {
     const { ctx, w, h } = fit(tape, 240);
     ctx.clearRect(0, 0, w, h);
     if (hist.length < 2) return;
-    let lo = Infinity, hi = -Infinity;
-    for (const p of hist) { lo = Math.min(lo, p.mid, p.micro); hi = Math.max(hi, p.mid, p.micro); }
-    const pad = (hi - lo) * 0.25 + 1e-6; lo -= pad; hi += pad;
+    const gap = 12, topH = (h - gap) * 0.60, botH = (h - gap) * 0.40, botY0 = topH + gap;
     const X = (i) => (i / (hist.length - 1)) * (w - 4) + 2;
-    const Y = (v) => h - 8 - ((v - lo) / (hi - lo)) * (h - 16);
-    // grid
+
+    // ── Top: mid price ──
+    let lo = Infinity, hi = -Infinity;
+    for (const p of hist) { lo = Math.min(lo, p.mid); hi = Math.max(hi, p.mid); }
+    const pad = (hi - lo) * 0.18 + 1e-9; lo -= pad; hi += pad;
+    const Yp = (v) => 6 + (hi - v) / (hi - lo) * (topH - 12);
     ctx.strokeStyle = css("--line"); ctx.lineWidth = 1;
-    for (let g = 0; g <= 3; g++) { const y = 8 + g * (h - 16) / 3; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
-    const line = (key, color, wd) => {
-      ctx.strokeStyle = color; ctx.lineWidth = wd; ctx.beginPath();
-      hist.forEach((p, i) => { const x = X(i), y = Y(p[key]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
-      ctx.stroke();
-    };
-    line("mid", css("--ink"), 1.4);
-    line("micro", css("--accent"), 2);
-    // endpoint dot on micro
-    const last = hist[hist.length - 1];
-    ctx.fillStyle = css("--accent");
-    ctx.beginPath(); ctx.arc(X(hist.length - 1), Y(last.micro), 3.2, 0, 7); ctx.fill();
+    for (let g = 0; g <= 2; g++) { const y = 6 + g * (topH - 12) / 2; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+    ctx.strokeStyle = css("--ink"); ctx.lineWidth = 1.6; ctx.beginPath();
+    hist.forEach((p, i) => { const x = X(i), y = Yp(p.mid); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.stroke();
+    ctx.fillStyle = css("--faint"); ctx.font = "9px " + css("--font-mono"); ctx.textAlign = "left";
+    ctx.fillText("MID PRICE", 2, topH - 2);
+
+    // ── Bottom: micro − mid in bp, filled around a zero baseline ──
+    let amax = 1e-9;
+    const bp = hist.map((p) => { const v = (p.micro - p.mid) / p.mid * 1e4; amax = Math.max(amax, Math.abs(v)); return v; });
+    amax *= 1.15;
+    const Ys = (v) => botY0 + botH / 2 - (v / amax) * (botH / 2 - 4);
+    const zy = Ys(0);
+    ctx.strokeStyle = css("--line"); ctx.setLineDash([3, 3]); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, zy); ctx.lineTo(w, zy); ctx.stroke(); ctx.setLineDash([]);
+    // filled area, positive = accent (predicts up), negative = ask
+    ctx.beginPath(); ctx.moveTo(X(0), zy);
+    hist.forEach((_, i) => ctx.lineTo(X(i), Ys(bp[i])));
+    ctx.lineTo(X(hist.length - 1), zy); ctx.closePath();
+    ctx.fillStyle = css("--accent"); ctx.globalAlpha = 0.16; ctx.fill(); ctx.globalAlpha = 1;
+    ctx.strokeStyle = css("--accent"); ctx.lineWidth = 1.6; ctx.beginPath();
+    hist.forEach((_, i) => { const x = X(i), y = Ys(bp[i]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.stroke();
+    const last = hist.length - 1;
+    ctx.fillStyle = css("--accent"); ctx.beginPath(); ctx.arc(X(last), Ys(bp[last]), 3, 0, 7); ctx.fill();
+    ctx.fillStyle = css("--faint"); ctx.font = "9px " + css("--font-mono"); ctx.textAlign = "left";
+    ctx.fillText("MICRO − MID (bp)", 2, botY0 + 9);
   }
 
   let acc = 0;
@@ -603,8 +649,9 @@
   vask.addEventListener("input", calc);
 
   // ── Evidence charts ─────────────────────────────────────────────────────
-  const HORIZ = [[1,52.23],[2,52.22],[5,51.87],[10,51.51],[20,51.00],[50,49.85],[100,49.19]];
-  const DECILE = [49.54,53.63,50.90,52.30,53.52,56.27,57.00,56.88,50.91,41.70];
+  // Baked fallbacks — overwritten by signal_stats.json when it loads (see boot()).
+  let HORIZ = [[1,52.23],[2,52.22],[5,51.87],[10,51.51],[20,51.00],[50,49.85],[100,49.19]];
+  let DECILE = [49.53,53.20,51.19,52.16,53.41,56.22,57.05,56.84,50.99,41.70];
 
   function drawHoriz() {
     const cv = document.getElementById("chart-h");
@@ -684,7 +731,46 @@
     requestAnimationFrame(loop);
   }
   function staticCharts() { calc(); drawHoriz(); drawDecile(); }
+
+  // ── Load measured stats (makes the page data-driven, not hand-typed). ──────
+  const fmtPct = (v) => (v == null || isNaN(v)) ? "—" : v.toFixed(1) + "%";
+  function applyData(d) {
+    if (Array.isArray(d.horizon) && d.horizon.length)
+      HORIZ = d.horizon.map((h) => [h.k, h.hit_rate]);
+    if (Array.isArray(d.decile) && d.decile.length) DECILE = d.decile.slice();
+    const set = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+    if (d.next_tick_hit_rate != null) set("st-nexttick", fmtPct(d.next_tick_hit_rate));
+    if (d.best_decile) set("st-best", fmtPct(d.best_decile.hit_rate));
+    if (d.worst_decile) set("st-worst", fmtPct(d.worst_decile.hit_rate));
+    if (d.decay_horizon != null) set("st-decay", "~" + d.decay_horizon);
+    if (d.n_ticks != null) {
+      set("prov-n", d.n_ticks.toLocaleString());
+      const chip = document.getElementById("chip-n"); if (chip) chip.textContent = d.n_ticks.toLocaleString();
+    }
+    // Hero: switch from synthetic walk to recorded FI-2010 replay.
+    if (d.replay && Array.isArray(d.replay.mid) && d.replay.mid.length > 2) {
+      rp = d.replay; rpi = 0;
+      hist.length = 0;
+      for (let i = 0; i < 150; i++) step();   // prime the tape so it's not empty on load
+      set("board-ttl", "FI-2010 replay · ticks " +
+        d.replay.start.toLocaleString() + "–" +
+        (d.replay.start + d.replay.mid.length).toLocaleString());
+      set("board-tag", "REPLAY");
+    }
+    staticCharts();
+  }
+  function boot() {
+    // 1) Data injected by a host (e.g. the Streamlit wrapper, whose sandboxed
+    //    iframe can't fetch relative files). 2) else fetch the sibling JSON when
+    //    served over http. 3) else keep the baked fallbacks (file:// / artifact).
+    if (window.__SIGNAL_STATS__) { try { applyData(window.__SIGNAL_STATS__); return; } catch (e) {} }
+    fetch("signal_stats.json", { cache: "no-store" })
+      .then((r) => r.ok ? r.json() : Promise.reject(r.status))
+      .then(applyData)
+      .catch(() => { /* keep baked fallbacks */ });
+  }
   staticCharts();
+  boot();
   addEventListener("resize", () => { staticCharts(); if (reduce) { drawLadder(); drawTape(); } });
   // redraw charts when theme flips
   new MutationObserver(staticCharts).observe(root, { attributes: true, attributeFilter: ["data-theme"] });
