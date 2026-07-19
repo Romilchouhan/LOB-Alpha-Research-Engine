@@ -1,54 +1,44 @@
 #!/usr/bin/env python3
-"""
-Micro-Price-LOB — Streamlit entry point (Streamlit Community Cloud default).
+"""Micro-Price-LOB — Streamlit entry point.
 
-Two pages, wired with st.navigation so the sidebar reads "Explainer" /
-"Feature Dashboard" (not the entry filename):
+Native multi-page app (no embedded HTML), so every chart is real Streamlit +
+Plotly and the surface is ready to extend to live data:
 
-  • Explainer — the interactive micro-price site (web/index.html), embedded with
-    its measured FI-2010 stats injected so it runs inside Streamlit's sandboxed
-    iframe (which cannot fetch local files), dark-matched to the chrome.
-  • Feature Dashboard — the existing dashboard/app.py, run as-is.
+  • Benchmark        — the honest FI-2010 result, rendered from reports/metrics.json.
+  • Feature Explorer — interactive exploration of an engine-dumped feature matrix.
 
-Only the active page's code runs per rerun (pg.run()), so each page owning its
-own st.set_page_config never collides.
+``st.set_page_config`` is called once here; the page modules must not call it again.
 
 Run locally:  streamlit run streamlit_app.py
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 import streamlit as st
-import streamlit.components.v1 as components
 
-WEB = Path(__file__).parent / "web"
+st.set_page_config(
+    page_title="Micro-Price-LOB",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
+# Light chrome polish on top of .streamlit/config.toml (dark, monospace).
+st.markdown(
+    """
+    <style>
+      .block-container { padding-top: 2.2rem; max-width: 1180px; }
+      [data-testid="stMetricValue"] { font-size: 1.55rem; }
+      [data-testid="stMetricLabel"] { opacity: 0.72; }
+      h1 { letter-spacing: -0.01em; font-weight: 650; }
+      h2, h3 { letter-spacing: -0.005em; }
+      [data-testid="stHeader"] { background: transparent; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
-def _explainer_html() -> str:
-    """index.html with measured stats injected + dark theme defaulted."""
-    html = (WEB / "index.html").read_text()
-    stats = WEB / "signal_stats.json"
-    data = stats.read_text() if stats.exists() else "null"
-    boot = (
-        "<script>"
-        f"window.__SIGNAL_STATS__ = {data};"
-        "document.documentElement.setAttribute('data-theme','dark');"
-        "</script>\n"
-    )
-    return boot + html
+benchmark = st.Page("dashboard/benchmark.py", title="Benchmark",
+                    icon="📊", default=True)
+explorer = st.Page("dashboard/app.py", title="Feature Explorer", icon="🔬")
 
-
-def explainer_page() -> None:
-    st.set_page_config(page_title="Micro-Price · Explainer",
-                       page_icon="📈", layout="wide")
-    st.markdown(
-        "<style>.block-container{padding:0 !important;max-width:100% !important;}</style>",
-        unsafe_allow_html=True)
-    components.html(_explainer_html(), height=4100, scrolling=True)
-
-
-explainer = st.Page(explainer_page, title="Explainer", icon="📈", default=True)
-dashboard = st.Page("dashboard/app.py", title="Feature Dashboard", icon="🔬")
-
-st.navigation([explainer, dashboard]).run()
+st.navigation([benchmark, explorer]).run()
