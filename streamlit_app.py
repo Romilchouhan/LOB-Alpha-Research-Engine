@@ -1,25 +1,24 @@
 #!/usr/bin/env python3
 """Micro-Price-LOB — Streamlit entry point.
 
-Native multi-page app (no embedded HTML), so every chart is real Streamlit +
-Plotly and the surface is ready to extend to live data:
+Single-page native app (no embedded HTML): the FI-2010 Benchmark, rendered from
+reports/metrics.json with real Streamlit + Plotly charts. Ready to extend to live
+data later.
 
-  • Benchmark        — the honest FI-2010 result, rendered from reports/metrics.json.
-  • Feature Explorer — interactive exploration of an engine-dumped feature matrix.
-
-``st.set_page_config`` is called once here; the page modules must not call it again.
-
-Run locally:  streamlit run streamlit_app.py
+Run:  streamlit run streamlit_app.py   (or ./run.sh)
 """
 from __future__ import annotations
+
+import sys
+from pathlib import Path
 
 import streamlit as st
 
 st.set_page_config(
-    page_title="Micro-Price-LOB",
-    page_icon="📈",
+    page_title="Micro-Price-LOB — FI-2010 Benchmark",
+    page_icon="📊",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 # Light chrome polish on top of .streamlit/config.toml (dark, monospace).
@@ -37,8 +36,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-benchmark = st.Page("dashboard/benchmark.py", title="Benchmark",
-                    icon="📊", default=True)
-explorer = st.Page("dashboard/app.py", title="Feature Explorer", icon="🔬")
+# Make `dashboard` importable regardless of launch cwd.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from dashboard.benchmark import render  # noqa: E402
 
-st.navigation([benchmark, explorer]).run()
+render()

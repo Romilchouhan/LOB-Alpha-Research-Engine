@@ -235,4 +235,6 @@ def render() -> None:
             "panel are planned next.")
 
 
-render()
+if __name__ == "__main__":
+    # Allows `streamlit run dashboard/benchmark.py` directly as well.
+    render()
