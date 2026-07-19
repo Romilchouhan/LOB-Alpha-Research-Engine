@@ -57,17 +57,15 @@ TEST(LimitOrderBook, DerivedQuantities) {
 
 namespace {
 
-/// Build one 40-column FI-2010 row: ask prices, ask vols, bid prices, bid vols.
+/// Build one 40-column FI-2010 row in the canonical PER-LEVEL INTERLEAVED
+/// layout: [P_ask, V_ask, P_bid, V_bid] repeated for levels 1..10.
 std::string make_row(double base) {
     std::string row;
-    for (int i = 0; i < 10; ++i)                       // ask_price_1..10
-        row += std::to_string(base + 0.5 + 0.1 * i) + ",";
-    for (int i = 0; i < 10; ++i)                       // ask_vol_1..10
-        row += std::to_string(100.0 + i) + ",";
-    for (int i = 0; i < 10; ++i)                       // bid_price_1..10
-        row += std::to_string(base - 0.5 - 0.1 * i) + ",";
-    for (int i = 0; i < 10; ++i) {                     // bid_vol_1..10
-        row += std::to_string(200.0 + i);
+    for (int i = 0; i < 10; ++i) {                     // level i (0-based)
+        row += std::to_string(base + 0.5 + 0.1 * i) + ",";  // ask price
+        row += std::to_string(100.0 + i) + ",";            // ask volume
+        row += std::to_string(base - 0.5 - 0.1 * i) + ",";  // bid price
+        row += std::to_string(200.0 + i);                  // bid volume
         if (i < 9) row += ",";
     }
     return row;

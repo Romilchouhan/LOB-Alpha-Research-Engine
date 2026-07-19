@@ -12,9 +12,11 @@
 namespace lob {
 
 /// Parse a FI-2010–format CSV file into a vector of LOBSnapshots.
-/// Expected column layout (per row, 40 values):
-///   ask_price_1 … ask_price_10, ask_vol_1 … ask_vol_10,
-///   bid_price_1 … bid_price_10, bid_vol_1 … bid_vol_10
+/// Expected column layout (per row, first 40 values) is PER-LEVEL INTERLEAVED,
+/// matching the canonical FI-2010 release. For level L (0-based, levels 1..10):
+///   vals[4L+0] = ask_price_(L+1)   vals[4L+1] = ask_vol_(L+1)
+///   vals[4L+2] = bid_price_(L+1)   vals[4L+3] = bid_vol_(L+1)
+/// i.e. [Pa1,Va1,Pb1,Vb1, Pa2,Va2,Pb2,Vb2, …, Pa10,Va10,Pb10,Vb10].
 ///
 /// Lines starting with '#' or alphabetic chars are treated as headers / comments.
 [[nodiscard]]
