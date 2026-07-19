@@ -37,7 +37,7 @@ FEATURE_LABELS = {
     "depth_imb_flow": "Depth-imbalance flow",
 }
 
-st.set_page_config(page_title="Micro-Price-LOB", page_icon="📈", layout="wide")
+# Page config is set once in streamlit_app.py (the st.navigation entry point).
 
 
 # ── Data loading ─────────────────────────────────────────────────────────────
@@ -141,16 +141,11 @@ def feature_chart(df: pd.DataFrame, features: list[str], normalize: bool) -> go.
 
 
 # ── App ──────────────────────────────────────────────────────────────────────
-st.title("📈 Micro-Price-LOB — Feature Research Dashboard")
-st.caption("FI-2010 limit-order-book microstructure features. Interactive "
-           "exploration + a lightweight IC preview of the Phase-1 signal study.")
-
-st.warning(
-    "**Honest framing.** This is a *feature-engineering & prediction* study, "
-    "not a trading system. There is **no tradable PnL** (no fill/queue/cost "
-    "model) and **no VPIN toxicity** claim (FI-2010 has no trade prints — "
-    "'depth-imbalance flow' is the VPIN formula repurposed as a plain feature).",
-    icon="⚠️")
+st.title("Feature Explorer")
+st.caption("Interactive exploration of an engine-dumped feature matrix. Zoom a "
+           "tick range, overlay features, and preview each signal's in-sample "
+           "information coefficient. For the headline result, see the "
+           "**Benchmark** page.")
 
 datasets = list_datasets()
 if not datasets:

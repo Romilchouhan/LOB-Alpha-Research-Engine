@@ -72,31 +72,26 @@ Hot-path throughput: ~12M ticks/s on Apple M2 (feature compute only).
 
 ---
 
-## Interactive explainer
+## Interactive app
 
-`web/index.html` is a self-contained, animated walkthrough of the micro-price:
-a **real FI-2010 replay** (recorded mid price + micro−mid signal), an interactive
-Stoikov calculator, and measured evidence — the short-horizon directional edge,
-decaying with horizon and reversing at extreme tilt. The displayed numbers are
-computed from the real 362,400-tick dump by `scripts/compute_signal_stats.py`
-(→ `web/signal_stats.json`), not hand-typed.
+A native Streamlit app with two pages:
 
-Run the Streamlit app (explainer + feature dashboard):
+- **Benchmark** — the honest FI-2010 result, rendered live from
+  `reports/metrics.json`: macro-F1 / accuracy vs prediction horizon for
+  LightGBM and logistic regression, with 95% bootstrap CIs and the published
+  DeepLOB baseline overlaid, plus the rank-IC decay.
+- **Feature Explorer** — interactive exploration of an engine-dumped feature
+  matrix (tick-range zoom, feature overlays, an in-sample IC preview).
 
 ```bash
 ./run.sh            # builds venv + deps on first run, opens http://localhost:8501
+# or:  streamlit run streamlit_app.py
 ```
 
-Or just the static explainer:
+Regenerate the benchmark the Benchmark page reads:
 
 ```bash
-python3 -m http.server -d web 8787   # then open http://localhost:8787
-```
-
-Regenerate the measured stats:
-
-```bash
-python3 scripts/compute_signal_stats.py --input data/fi2010.csv
+python -m python.fi2010.run_benchmark --out reports/metrics.json
 ```
 
 ---
