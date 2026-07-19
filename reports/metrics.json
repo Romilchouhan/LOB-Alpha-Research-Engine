@@ -1,0 +1,497 @@
+{
+  "dataset": "FI2010_train.csv (Zscore, 362400 ticks)",
+  "seed": 42,
+  "n_folds": 5,
+  "embargo": 100,
+  "horizons": [
+    1,
+    2,
+    3,
+    5,
+    10
+  ],
+  "horizon_events": [
+    10,
+    20,
+    30,
+    50,
+    100
+  ],
+  "horizon_note": "The 5 label columns are the canonical Ntakaris FI-2010 labels. Their TRUE prediction horizons are event counts {10,20,30,50,100} (verified: stationary-class fraction falls 0.639->0.245 across columns). The JSON key 'k' is the Phase-1 plan's 1..10 column index; 'k_events' is the true horizon used for the DeepLOB comparison. Column j -> event horizon: 1->10, 2->20, 3->30, 5->50, 10->100.",
+  "subsample_note": null,
+  "config": {
+    "lgbm_estimators": 200,
+    "n_boot": 1000,
+    "max_train_per_fold": null,
+    "metric": "macro-F1 (unweighted 3-class); CI = stationary bootstrap (Politis-Romano, Politis-White auto block length)"
+  },
+  "models": {
+    "logreg": [
+      {
+        "k": 1,
+        "k_events": 10,
+        "acc": 0.652454,
+        "macro_f1": 0.360611,
+        "f1_ci95": [
+          0.356823,
+          0.364441
+        ],
+        "acc_foldmean": 0.652454,
+        "acc_foldstd": 0.03961,
+        "macro_f1_foldmean": 0.353136,
+        "macro_f1_foldstd": 0.042418,
+        "boot_mean_block": 39.916,
+        "fold_f1": [
+          0.300739,
+          0.32327,
+          0.392432,
+          0.412645,
+          0.336593
+        ]
+      },
+      {
+        "k": 2,
+        "k_events": 20,
+        "acc": 0.580937,
+        "macro_f1": 0.429597,
+        "f1_ci95": [
+          0.426046,
+          0.433256
+        ],
+        "acc_foldmean": 0.580937,
+        "acc_foldstd": 0.045071,
+        "macro_f1_foldmean": 0.424297,
+        "macro_f1_foldstd": 0.030039,
+        "boot_mean_block": 39.57,
+        "fold_f1": [
+          0.383931,
+          0.397425,
+          0.441625,
+          0.466779,
+          0.431726
+        ]
+      },
+      {
+        "k": 3,
+        "k_events": 30,
+        "acc": 0.501811,
+        "macro_f1": 0.445028,
+        "f1_ci95": [
+          0.44122,
+          0.44878
+        ],
+        "acc_foldmean": 0.501811,
+        "acc_foldstd": 0.048248,
+        "macro_f1_foldmean": 0.436063,
+        "macro_f1_foldstd": 0.010869,
+        "boot_mean_block": 39.458,
+        "fold_f1": [
+          0.422775,
+          0.42321,
+          0.441561,
+          0.444717,
+          0.448052
+        ]
+      },
+      {
+        "k": 5,
+        "k_events": 50,
+        "acc": 0.428815,
+        "macro_f1": 0.427808,
+        "f1_ci95": [
+          0.41469,
+          0.43955
+        ],
+        "acc_foldmean": 0.428815,
+        "acc_foldstd": 0.029497,
+        "macro_f1_foldmean": 0.411605,
+        "macro_f1_foldstd": 0.02869,
+        "boot_mean_block": 1649.0,
+        "fold_f1": [
+          0.416158,
+          0.384098,
+          0.429972,
+          0.37523,
+          0.452566
+        ]
+      },
+      {
+        "k": 10,
+        "k_events": 100,
+        "acc": 0.444149,
+        "macro_f1": 0.356316,
+        "f1_ci95": [
+          0.352147,
+          0.360812
+        ],
+        "acc_foldmean": 0.444149,
+        "acc_foldstd": 0.036683,
+        "macro_f1_foldmean": 0.352602,
+        "macro_f1_foldstd": 0.016593,
+        "boot_mean_block": 45.351,
+        "fold_f1": [
+          0.372663,
+          0.330793,
+          0.335762,
+          0.357305,
+          0.36649
+        ]
+      }
+    ],
+    "lightgbm": [
+      {
+        "k": 1,
+        "k_events": 10,
+        "acc": 0.694907,
+        "macro_f1": 0.500347,
+        "f1_ci95": [
+          0.497574,
+          0.503378
+        ],
+        "acc_foldmean": 0.694907,
+        "acc_foldstd": 0.028228,
+        "macro_f1_foldmean": 0.496886,
+        "macro_f1_foldstd": 0.03479,
+        "boot_mean_block": 36.359,
+        "fold_f1": [
+          0.520967,
+          0.53472,
+          0.518886,
+          0.450715,
+          0.459143
+        ]
+      },
+      {
+        "k": 2,
+        "k_events": 20,
+        "acc": 0.728808,
+        "macro_f1": 0.639786,
+        "f1_ci95": [
+          0.637636,
+          0.641831
+        ],
+        "acc_foldmean": 0.728808,
+        "acc_foldstd": 0.024743,
+        "macro_f1_foldmean": 0.637823,
+        "macro_f1_foldstd": 0.013284,
+        "boot_mean_block": 24.82,
+        "fold_f1": [
+          0.642498,
+          0.656505,
+          0.644385,
+          0.619643,
+          0.626083
+        ]
+      },
+      {
+        "k": 3,
+        "k_events": 30,
+        "acc": 0.652901,
+        "macro_f1": 0.601078,
+        "f1_ci95": [
+          0.598405,
+          0.603799
+        ],
+        "acc_foldmean": 0.652901,
+        "acc_foldstd": 0.024604,
+        "macro_f1_foldmean": 0.596349,
+        "macro_f1_foldstd": 0.01494,
+        "boot_mean_block": 33.66,
+        "fold_f1": [
+          0.609671,
+          0.607121,
+          0.607529,
+          0.572573,
+          0.58485
+        ]
+      },
+      {
+        "k": 5,
+        "k_events": 50,
+        "acc": 0.54957,
+        "macro_f1": 0.547708,
+        "f1_ci95": [
+          0.543726,
+          0.551521
+        ],
+        "acc_foldmean": 0.54957,
+        "acc_foldstd": 0.020947,
+        "macro_f1_foldmean": 0.538166,
+        "macro_f1_foldstd": 0.016305,
+        "boot_mean_block": 35.851,
+        "fold_f1": [
+          0.536782,
+          0.508529,
+          0.556082,
+          0.549313,
+          0.540125
+        ]
+      },
+      {
+        "k": 10,
+        "k_events": 100,
+        "acc": 0.503692,
+        "macro_f1": 0.457079,
+        "f1_ci95": [
+          0.451646,
+          0.463182
+        ],
+        "acc_foldmean": 0.503692,
+        "acc_foldstd": 0.035119,
+        "macro_f1_foldmean": 0.442078,
+        "macro_f1_foldstd": 0.041006,
+        "boot_mean_block": 42.835,
+        "fold_f1": [
+          0.422083,
+          0.390036,
+          0.422629,
+          0.507007,
+          0.468634
+        ]
+      }
+    ]
+  },
+  "ic_decay": [
+    {
+      "feature": "micro_minus_mid",
+      "k": 1,
+      "k_events": 10,
+      "rank_ic": 0.01352207566237203,
+      "rank_ic_std": 0.023653731946491934
+    },
+    {
+      "feature": "P_ask_1",
+      "k": 1,
+      "k_events": 10,
+      "rank_ic": 0.001783450906793678,
+      "rank_ic_std": 0.01602861882362991
+    },
+    {
+      "feature": "V_ask_1",
+      "k": 1,
+      "k_events": 10,
+      "rank_ic": 0.019190926864462787,
+      "rank_ic_std": 0.1417272163133367
+    },
+    {
+      "feature": "P_bid_1",
+      "k": 1,
+      "k_events": 10,
+      "rank_ic": 0.0017497974092513893,
+      "rank_ic_std": 0.01601553612224319
+    },
+    {
+      "feature": "V_bid_1",
+      "k": 1,
+      "k_events": 10,
+      "rank_ic": -0.030850943978538,
+      "rank_ic_std": 0.1509796729172871
+    },
+    {
+      "feature": "micro_minus_mid",
+      "k": 2,
+      "k_events": 20,
+      "rank_ic": 0.01175451798689011,
+      "rank_ic_std": 0.02678047167870259
+    },
+    {
+      "feature": "P_ask_1",
+      "k": 2,
+      "k_events": 20,
+      "rank_ic": 0.006496995906771806,
+      "rank_ic_std": 0.024327324487987297
+    },
+    {
+      "feature": "V_ask_1",
+      "k": 2,
+      "k_events": 20,
+      "rank_ic": 0.009941350872731552,
+      "rank_ic_std": 0.12080244202606295
+    },
+    {
+      "feature": "P_bid_1",
+      "k": 2,
+      "k_events": 20,
+      "rank_ic": 0.006855289866677619,
+      "rank_ic_std": 0.024164507176854737
+    },
+    {
+      "feature": "V_bid_1",
+      "k": 2,
+      "k_events": 20,
+      "rank_ic": -0.021940734104993843,
+      "rank_ic_std": 0.12527755106406455
+    },
+    {
+      "feature": "micro_minus_mid",
+      "k": 3,
+      "k_events": 30,
+      "rank_ic": 0.007472348541229698,
+      "rank_ic_std": 0.02755088318159163
+    },
+    {
+      "feature": "P_ask_1",
+      "k": 3,
+      "k_events": 30,
+      "rank_ic": 0.0068626409617702526,
+      "rank_ic_std": 0.03352741229618436
+    },
+    {
+      "feature": "V_ask_1",
+      "k": 3,
+      "k_events": 30,
+      "rank_ic": 0.003061350241834218,
+      "rank_ic_std": 0.10453571118721151
+    },
+    {
+      "feature": "P_bid_1",
+      "k": 3,
+      "k_events": 30,
+      "rank_ic": 0.0074703881029675265,
+      "rank_ic_std": 0.03315779856697842
+    },
+    {
+      "feature": "V_bid_1",
+      "k": 3,
+      "k_events": 30,
+      "rank_ic": -0.01988764262867001,
+      "rank_ic_std": 0.10413455911683556
+    },
+    {
+      "feature": "micro_minus_mid",
+      "k": 5,
+      "k_events": 50,
+      "rank_ic": 0.0011382708492506523,
+      "rank_ic_std": 0.02382378375148724
+    },
+    {
+      "feature": "P_ask_1",
+      "k": 5,
+      "k_events": 50,
+      "rank_ic": 0.002965178069794219,
+      "rank_ic_std": 0.04388736432669538
+    },
+    {
+      "feature": "V_ask_1",
+      "k": 5,
+      "k_events": 50,
+      "rank_ic": -0.00207686522553614,
+      "rank_ic_std": 0.08219800775538015
+    },
+    {
+      "feature": "P_bid_1",
+      "k": 5,
+      "k_events": 50,
+      "rank_ic": 0.003766368851303299,
+      "rank_ic_std": 0.04320424395154931
+    },
+    {
+      "feature": "V_bid_1",
+      "k": 5,
+      "k_events": 50,
+      "rank_ic": -0.02269054082930582,
+      "rank_ic_std": 0.07769529750167878
+    },
+    {
+      "feature": "micro_minus_mid",
+      "k": 10,
+      "k_events": 100,
+      "rank_ic": 0.0013575147589415693,
+      "rank_ic_std": 0.01717215553065059
+    },
+    {
+      "feature": "P_ask_1",
+      "k": 10,
+      "k_events": 100,
+      "rank_ic": -0.00045180823628468425,
+      "rank_ic_std": 0.06163349455596973
+    },
+    {
+      "feature": "V_ask_1",
+      "k": 10,
+      "k_events": 100,
+      "rank_ic": -0.00626843610141985,
+      "rank_ic_std": 0.05352550813981182
+    },
+    {
+      "feature": "P_bid_1",
+      "k": 10,
+      "k_events": 100,
+      "rank_ic": 0.00048645953078173265,
+      "rank_ic_std": 0.06044059844000401
+    },
+    {
+      "feature": "V_bid_1",
+      "k": 10,
+      "k_events": 100,
+      "rank_ic": -0.028588215099806767,
+      "rank_ic_std": 0.04881412738978684
+    }
+  ],
+  "published_reference": [
+    {
+      "source": "DeepLOB 2019 (Setup 2, anchored)",
+      "k": 10,
+      "macro_f1": 0.834,
+      "accuracy": 0.8447,
+      "setup": "FI-2010 Zscore, horizon=10 events, train-early/test-late (Table II)"
+    },
+    {
+      "source": "DeepLOB 2019 (Setup 2, anchored)",
+      "k": 20,
+      "macro_f1": 0.7282,
+      "accuracy": 0.7485,
+      "setup": "FI-2010 Zscore, horizon=20 events, train-early/test-late"
+    },
+    {
+      "source": "DeepLOB 2019 (Setup 2, anchored)",
+      "k": 50,
+      "macro_f1": 0.8035,
+      "accuracy": 0.8051,
+      "setup": "FI-2010 Zscore, horizon=50 events, train-early/test-late"
+    },
+    {
+      "source": "DeepLOB 2019 (Setup 1, 9-fold CV)",
+      "k": 10,
+      "macro_f1": 0.7766,
+      "accuracy": 0.7891,
+      "setup": "FI-2010 Zscore, horizon=10 events, anchored 9-fold CV (Table I)"
+    },
+    {
+      "source": "DeepLOB 2019 (Setup 1, 9-fold CV)",
+      "k": 100,
+      "macro_f1": 0.7658,
+      "accuracy": 0.7666,
+      "setup": "FI-2010 Zscore, horizon=100 events, anchored 9-fold CV"
+    },
+    {
+      "source": "BoF baseline (Ntakaris et al., via DeepLOB Table I)",
+      "k": 10,
+      "macro_f1": 0.3628,
+      "accuracy": 0.5759,
+      "setup": "FI-2010, horizon=10 events, classical bag-of-features (Setup 1)"
+    },
+    {
+      "source": "MLP baseline (via DeepLOB Table II)",
+      "k": 20,
+      "macro_f1": 0.5112,
+      "accuracy": null,
+      "setup": "FI-2010, horizon=20 events, MLP on handcrafted features (Setup 2)"
+    }
+  ],
+  "headline": {
+    "model": "lightgbm",
+    "k": 2,
+    "k_events": 20,
+    "macro_f1": 0.639786,
+    "f1_ci95": [
+      0.637636,
+      0.641831
+    ],
+    "vs_deeplob_setup2_same_horizon": {
+      "source": "DeepLOB 2019 (Setup 2, anchored)",
+      "macro_f1": 0.7282
+    }
+  },
+  "runtime_sec": 828.0
+}
