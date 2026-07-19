@@ -54,17 +54,15 @@ std::vector<LOBSnapshot> parse_fi2010_csv(const std::filesystem::path& file) {
 
         if (col < kFI2010Columns) continue;  // malformed row
 
-        // FI-2010 canonical column order:
-        //   0-9  : ask_price_1 … ask_price_10
-        //  10-19 : ask_vol_1   … ask_vol_10
-        //  20-29 : bid_price_1 … bid_price_10
-        //  30-39 : bid_vol_1   … bid_vol_10
+        // FI-2010 canonical column order is PER-LEVEL INTERLEAVED. For level L:
+        //   vals[4L+0] = ask_price_(L+1)   vals[4L+1] = ask_vol_(L+1)
+        //   vals[4L+2] = bid_price_(L+1)   vals[4L+3] = bid_vol_(L+1)
         LOBSnapshot snap{};
         for (int i = 0; i < kMaxDepth; ++i) {
-            snap.asks[i].price  = vals[i];
-            snap.asks[i].volume = vals[i + 10];
-            snap.bids[i].price  = vals[i + 20];
-            snap.bids[i].volume = vals[i + 30];
+            snap.asks[i].price  = vals[4 * i + 0];
+            snap.asks[i].volume = vals[4 * i + 1];
+            snap.bids[i].price  = vals[4 * i + 2];
+            snap.bids[i].volume = vals[4 * i + 3];
         }
         snapshots.push_back(snap);
     }
