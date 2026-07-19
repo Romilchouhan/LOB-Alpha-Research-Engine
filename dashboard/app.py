@@ -20,7 +20,9 @@ from plotly.subplots import make_subplots
 
 # Directory the engine writes CSVs into (overridable in the container).
 import os
-DATA_DIR = Path(os.environ.get("LOB_DATA_DIR", "data"))
+# Anchor to the repo's data/ regardless of launch cwd (env var overrides).
+_DEFAULT_DATA = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR = Path(os.environ.get("LOB_DATA_DIR", str(_DEFAULT_DATA)))
 
 # Feature columns that may appear in the CSV, with human labels.
 FEATURE_LABELS = {

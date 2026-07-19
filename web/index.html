@@ -9,7 +9,7 @@
     --panel-2: #FBFCFE;
     --ink:     #0D1220;
     --muted:   #586074;
-    --faint:   #8A92A6;
+    --faint:   #6B7488;
     --line:    #E3E7F0;
     --accent:  #4F46E5;   /* micro-price — the brand signal */
     --accent-2:#0E9BB0;
@@ -27,7 +27,7 @@
       --panel-2: #0C0F17;
       --ink:     #E8EBF4;
       --muted:   #949CB2;
-      --faint:   #626B82;
+      --faint:   #7C8598;
       --line:    #1F2536;
       --accent:  #8B84FF;
       --accent-2:#34D3E6;
@@ -39,12 +39,12 @@
   }
   :root[data-theme="light"] {
     --bg:#F4F6FA; --panel:#FFFFFF; --panel-2:#FBFCFE; --ink:#0D1220; --muted:#586074;
-    --faint:#8A92A6; --line:#E3E7F0; --accent:#4F46E5; --accent-2:#0E9BB0; --bid:#0C9A6A;
+    --faint:#6B7488; --line:#E3E7F0; --accent:#4F46E5; --accent-2:#0E9BB0; --bid:#0C9A6A;
     --ask:#E0454B; --warn:#B9760A; --shadow:0 1px 2px rgba(13,18,32,.06),0 8px 30px rgba(13,18,32,.06);
   }
   :root[data-theme="dark"] {
     --bg:#080A10; --panel:#10131C; --panel-2:#0C0F17; --ink:#E8EBF4; --muted:#949CB2;
-    --faint:#626B82; --line:#1F2536; --accent:#8B84FF; --accent-2:#34D3E6; --bid:#2FD79B;
+    --faint:#7C8598; --line:#1F2536; --accent:#8B84FF; --accent-2:#34D3E6; --bid:#2FD79B;
     --ask:#FF6472; --warn:#E7B24A; --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 40px rgba(0,0,0,.35);
   }
 
@@ -226,7 +226,7 @@
       </p>
       <div class="chips">
         <span class="chip"><b>Stoikov</b> volume-weighted fair value</span>
-        <span class="chip">C++20 hot path · <b>12M ticks/s</b></span>
+        <span class="chip">C++20 · <b>~12M ticks/s</b> feature compute (M2)</span>
         <span class="chip">FI-2010 · <b id="chip-n">362,400</b> snapshots</span>
       </div>
     </div>
@@ -403,7 +403,6 @@
   // ── Theme toggle ────────────────────────────────────────────────────────
   const root = document.documentElement;
   document.getElementById("theme").addEventListener("click", () => {
-    const cur = getComputedStyle(root).getPropertyValue("--isdark").trim();
     const isDark = root.getAttribute("data-theme")
       ? root.getAttribute("data-theme") === "dark"
       : matchMedia("(prefers-color-scheme: dark)").matches;
@@ -552,17 +551,20 @@
     ctx.fillText("MICRO − MID (bp)", 2, botY0 + 9);
   }
 
+  function setReadouts(s) {
+    roMid.textContent = s.mid.toFixed(2);
+    roMicro.textContent = s.micro.toFixed(4);
+    const bp = (s.micro - s.mid) / s.mid * 1e4;
+    roTilt.textContent = (bp >= 0 ? "+" : "") + bp.toFixed(1) + " bp";
+    roTilt.style.color = bp >= 0 ? css("--bid") : css("--ask");
+  }
+
   let acc = 0;
   function heroFrame(dt) {
     acc += dt;
     if (acc > 90) {            // ~11 fps sim cadence, smooth enough, calm
       acc = 0;
-      const s = step();
-      roMid.textContent = s.mid.toFixed(2);
-      roMicro.textContent = s.micro.toFixed(4);
-      const bp = (s.micro - s.mid) / s.mid * 1e4;
-      roTilt.textContent = (bp >= 0 ? "+" : "") + bp.toFixed(1) + " bp";
-      roTilt.style.color = bp >= 0 ? css("--bid") : css("--ask");
+      setReadouts(step());
     }
     drawLadder(); drawTape();
   }
@@ -748,8 +750,10 @@
       const chip = document.getElementById("chip-n"); if (chip) chip.textContent = d.n_ticks.toLocaleString();
     }
     // Hero: switch from synthetic walk to recorded FI-2010 replay.
-    if (d.replay && Array.isArray(d.replay.mid) && d.replay.mid.length > 2) {
-      rp = d.replay; rpi = 0;
+    if (d.replay && Array.isArray(d.replay.mid) && Array.isArray(d.replay.micro) && d.replay.mid.length > 2) {
+      const len = Math.min(d.replay.mid.length, d.replay.micro.length);  // guard mismatched lengths
+      rp = { start: d.replay.start, mid: d.replay.mid.slice(0, len), micro: d.replay.micro.slice(0, len) };
+      rpi = 0;
       hist.length = 0;
       for (let i = 0; i < 150; i++) step();   // prime the tape so it's not empty on load
       set("board-ttl", "FI-2010 replay · ticks " +
@@ -775,7 +779,9 @@
   // redraw charts when theme flips
   new MutationObserver(staticCharts).observe(root, { attributes: true, attributeFilter: ["data-theme"] });
 
-  if (reduce) { for (let i = 0; i < 120; i++) step(); drawLadder(); drawTape(); }
-  else requestAnimationFrame(loop);
+  if (reduce) {
+    let s; for (let i = 0; i < 120; i++) s = step();
+    setReadouts(s); drawLadder(); drawTape();   // static snapshot, but readouts filled
+  } else requestAnimationFrame(loop);
 })();
 </script>
