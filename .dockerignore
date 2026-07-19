@@ -1,0 +1,12 @@
+build/
+build-debug/
+.ua/
+.git/
+plots/
+docs/
+scripts/
+*.md
+data/*.csv
+data/*.zip
+data/*.bin
+**/.DS_Store

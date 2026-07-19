@@ -4,6 +4,8 @@
 
 #include "io/parquet_writer.hpp"
 
+#include <cstdint>
+
 // Workaround: Apple's SDK ships std::bit_width but omits the __cpp_lib_bitops
 // feature-test macro, which makes arrow/util/bit_util.h fall back to
 // std::log2p1 — a pre-C++20-final name that never shipped in libc++. Assert

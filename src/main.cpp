@@ -30,6 +30,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <exception>
 #include <fstream>
@@ -176,6 +177,11 @@ static int run_engine(const Args& args) {
 
     // Time-series accumulators
     std::vector<double> micro_series, mid_series, obi_series;
+    std::vector<double> ofi_series, ofir_series, rv50_series, rv200_series,
+                        accel_series, bslope_series, aslope_series;
+    for (auto* v : {&ofi_series, &ofir_series, &rv50_series, &rv200_series,
+                    &accel_series, &bslope_series, &aslope_series})
+        v->reserve(snapshots.size());
     micro_series.reserve(snapshots.size());
     mid_series.reserve(snapshots.size());
     obi_series.reserve(snapshots.size());
@@ -218,6 +224,15 @@ static int run_engine(const Args& args) {
         const double rv50  = rv50_engine.update(mid);
         const double rv200 = rv200_engine.update(mid);
         const double accel = accel_engine.update(mid);
+        const auto   slope = features::BookSlope::compute(book);
+
+        ofi_series.push_back(ofi);
+        ofir_series.push_back(ofi_engine.rolling_sum());
+        rv50_series.push_back(rv50);
+        rv200_series.push_back(rv200);
+        accel_series.push_back(accel);
+        bslope_series.push_back(slope.bid_slope);
+        aslope_series.push_back(slope.ask_slope);
 
         // ── Trader decision ─────────────────────────────────────────
         switch (trader.on_tick(book)) {
@@ -229,7 +244,6 @@ static int run_engine(const Args& args) {
 
 #ifdef LOB_HAS_PARQUET
         if (parquet) {
-            const auto slope = features::BookSlope::compute(book);
             io::FeatureRow row;
             row.tick        = static_cast<std::int64_t>(i);
             row.mid         = mid;
@@ -288,7 +302,9 @@ static int run_engine(const Args& args) {
     // ── 5. CSV export ──────────────────────────────────────────────────
     if (!args.dump_csv.empty()) {
         std::ofstream csv(args.dump_csv);
-        csv << "tick,mid_price,micro_price,obi,spread,pnl,position,depth_imb_flow,action\n";
+        csv << "tick,mid_price,micro_price,obi,spread,ofi,ofi_rolling,"
+               "bid_slope,ask_slope,rv_50,rv_200,accel,depth_imb_flow,"
+               "pnl,position,action\n";
         const auto& trades = trader.trades();
         for (std::size_t i = 0; i < snapshots.size(); ++i) {
             csv << i
@@ -296,9 +312,16 @@ static int run_engine(const Args& args) {
                 << "," << micro_series[i]
                 << "," << obi_series[i]
                 << "," << (snapshots[i].asks[0].price - snapshots[i].bids[0].price)
+                << "," << ofi_series[i]
+                << "," << ofir_series[i]
+                << "," << bslope_series[i]
+                << "," << aslope_series[i]
+                << "," << rv50_series[i]
+                << "," << rv200_series[i]
+                << "," << accel_series[i]
+                << "," << (i < trades.size() ? trades[i].dif : 0.0)
                 << "," << (i < trades.size() ? trades[i].pnl : 0.0)
                 << "," << (i < trades.size() ? trades[i].position : 0.0)
-                << "," << (i < trades.size() ? trades[i].dif : 0.0)
                 << "," << (i < trades.size() ? trading::to_string(trades[i].action)
                                              : "")
                 << "\n";

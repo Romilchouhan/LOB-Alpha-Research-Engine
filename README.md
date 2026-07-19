@@ -72,9 +72,61 @@ Hot-path throughput: ~12M ticks/s on Apple M2 (feature compute only).
 
 ---
 
-## Build
+## Interactive explainer
 
-Requires CMake 3.22+. Targets Apple Silicon (arm64, `-mcpu=apple-m2`).
+`web/index.html` is a self-contained, animated walkthrough of the micro-price:
+a **real FI-2010 replay** (recorded mid price + micro−mid signal), an interactive
+Stoikov calculator, and measured evidence — the short-horizon directional edge,
+decaying with horizon and reversing at extreme tilt. The displayed numbers are
+computed from the real 362,400-tick dump by `scripts/compute_signal_stats.py`
+(→ `web/signal_stats.json`), not hand-typed.
+
+Run the Streamlit app (explainer + feature dashboard):
+
+```bash
+./run.sh            # builds venv + deps on first run, opens http://localhost:8501
+```
+
+Or just the static explainer:
+
+```bash
+python3 -m http.server -d web 8787   # then open http://localhost:8787
+```
+
+Regenerate the measured stats:
+
+```bash
+python3 scripts/compute_signal_stats.py --input data/fi2010.csv
+```
+
+---
+
+## Quick start (Docker — one command)
+
+The whole pipeline — build the C++ engine, generate the feature matrix, serve an
+interactive dashboard — in one command. No CMake, no Python setup.
+
+```bash
+docker compose up            # first run builds the image (~2-3 min)
+```
+
+Then open **http://localhost:8501**. The dashboard lets you:
+- zoom a tick range, overlay features (OBI, OFI, realized-vol, depth-imbalance flow),
+- inspect an **information-coefficient (IC) table** — each signal vs forward mid-return,
+  a preview of the Phase-1 study,
+- download the filtered feature matrix as CSV.
+
+A **synthetic** dataset is generated inside the container automatically. To also
+analyse **real FI-2010**, drop the preprocessed binary at `data/lob.bin` (see
+[Data preprocessing](#data-preprocessing)) before `docker compose up` — it is
+picked up via the mounted `./data` volume.
+
+---
+
+## Build (native)
+
+Requires CMake 3.22+. Targets Apple Silicon (arm64, `-mcpu=apple-m2`); builds
+portably elsewhere.
 
 ```bash
 # Minimal build

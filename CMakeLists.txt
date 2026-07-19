@@ -10,10 +10,16 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# ── Apple-Silicon / ARM64 tuning ─────────────────────────────────────────────
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+# ── Architecture tuning ──────────────────────────────────────────────────────
+# -mcpu=apple-m2 is only valid on Apple's toolchain. Inside a Linux aarch64
+# container (Docker) the compiler rejects it, so gate it on APPLE and fall back
+# to a portable build elsewhere.
+if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
     set(CMAKE_CXX_FLAGS_RELEASE "-O3 -mcpu=apple-m2 -DNDEBUG")
     message(STATUS "[LOB] Targeting Apple Silicon (arm64) — -mcpu=apple-m2")
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+    set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
+    message(STATUS "[LOB] Targeting aarch64 (portable -O3)")
 else()
     set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -DNDEBUG")
 endif()
@@ -22,6 +28,7 @@ endif()
 option(LOB_ENABLE_PLOTTING   "Build with Matplotplusplus support"           OFF)
 option(LOB_ENABLE_SANITIZERS "Build with ASan + UBSan instrumentation"      OFF)
 option(LOB_ENABLE_PARQUET    "Build the Arrow/Parquet feature-matrix writer" ON)
+option(LOB_BUILD_TESTS       "Build the GoogleTest suite (fetches gtest)"   ON)
 
 # ── Warnings (project targets only — never fetched third-party code) ────────
 set(LOB_WARNING_FLAGS -Wall -Wextra -Wpedantic -Werror)
@@ -88,19 +95,21 @@ if(LOB_ENABLE_PLOTTING)
 endif()
 
 # ── Tests ────────────────────────────────────────────────────────────────────
-enable_testing()
+if(LOB_BUILD_TESTS)
+    enable_testing()
 
-FetchContent_Declare(
-    googletest
-    GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG        v1.14.0
-    GIT_SHALLOW    TRUE
-)
-# Windows-only, but harmless and documented gtest best practice.
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(googletest)
+    FetchContent_Declare(
+        googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG        v1.14.0
+        GIT_SHALLOW    TRUE
+    )
+    # Windows-only, but harmless and documented gtest best practice.
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(googletest)
 
-add_subdirectory(tests)
+    add_subdirectory(tests)
+endif()
 
 # ── Install ──────────────────────────────────────────────────────────────────
 install(TARGETS lob_engine DESTINATION bin)
