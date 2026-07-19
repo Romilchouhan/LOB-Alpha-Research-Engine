@@ -75,12 +75,28 @@ Hot-path throughput: ~12M ticks/s on Apple M2 (feature compute only).
 ## Interactive explainer
 
 `web/index.html` is a self-contained, animated walkthrough of the micro-price:
-a live order-book simulation, an interactive Stoikov calculator, and the honest
-FI-2010 evidence (short-horizon directional edge, decaying with horizon,
-reversing at extreme tilt). Open the file in a browser, or serve it:
+a **real FI-2010 replay** (recorded mid price + micro−mid signal), an interactive
+Stoikov calculator, and measured evidence — the short-horizon directional edge,
+decaying with horizon and reversing at extreme tilt. The displayed numbers are
+computed from the real 362,400-tick dump by `scripts/compute_signal_stats.py`
+(→ `web/signal_stats.json`), not hand-typed.
+
+Run the Streamlit app (explainer + feature dashboard):
+
+```bash
+./run.sh            # builds venv + deps on first run, opens http://localhost:8501
+```
+
+Or just the static explainer:
 
 ```bash
 python3 -m http.server -d web 8787   # then open http://localhost:8787
+```
+
+Regenerate the measured stats:
+
+```bash
+python3 scripts/compute_signal_stats.py --input data/fi2010.csv
 ```
 
 ---
