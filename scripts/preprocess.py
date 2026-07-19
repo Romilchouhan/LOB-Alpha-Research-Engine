@@ -28,13 +28,22 @@ import numpy as np
 
 # ── FI-2010 Column Mapping ───────────────────────────────────────────────────
 #
-# The canonical FI-2010 dataset has 144 columns per row.  The FIRST 40 are the
-# raw LOB data that we care about:
+# The canonical FI-2010 dataset has 144 feature columns per row.  The FIRST 40
+# are the raw 10-level LOB data that we care about, laid out PER-LEVEL
+# INTERLEAVED (NOT block-by-field). For level L (0-based, levels 1..10):
 #
-#   Columns  0 –  9 : Ask prices   (level 1–10, ascending)
-#   Columns 10 – 19 : Ask volumes  (level 1–10)
-#   Columns 20 – 29 : Bid prices   (level 1–10, descending)
-#   Columns 30 – 39 : Bid volumes  (level 1–10)
+#   raw[4L + 0] : ask price  (P_ask, level L+1) — positive, ~0.30–0.32 (Zscore)
+#   raw[4L + 1] : ask volume (V_ask, level L+1) — z-scored, can be negative
+#   raw[4L + 2] : bid price  (P_bid, level L+1) — positive
+#   raw[4L + 3] : bid volume (V_bid, level L+1) — z-scored, can be negative
+#
+# i.e. raw = [Pa1,Va1,Pb1,Vb1, Pa2,Va2,Pb2,Vb2, …, Pa10,Va10,Pb10,Vb10].
+# VERIFIED against data/FI2010_train.csv: even raw indices are prices (all
+# positive), odd raw indices are volumes (all negative under Zscore norm).
+#
+# NOTE: the earlier assumption of a "block" layout (ask_px[0:10],
+# ask_vol[10:20], bid_px[20:30], bid_vol[30:40]) was WRONG and scrambled every
+# derived feature. See reorder_to_interleaved() for the correct mapping.
 #
 # Some distributions transpose the matrix (features × time), so we auto-detect
 # orientation and transpose if needed.
@@ -96,24 +105,25 @@ def load_raw(path: Path, delimiter: str = ",", skip_header: int = 0) -> np.ndarr
 
 def reorder_to_interleaved(row: np.ndarray) -> np.ndarray:
     """
-    Reorder from FI-2010 canonical (price_block, vol_block, …) to the
-    C++ LOBSnapshot interleaved layout:
+    Map the raw FI-2010 first-40 columns (per-level interleaved
+    [P_ask, V_ask, P_bid, V_bid] × 10 levels) onto the C++ LOBSnapshot
+    binary layout, which groups the asks block then the bids block:
 
-      ask[0].price, ask[0].vol, ask[1].price, ask[1].vol, …,
-      bid[0].price, bid[0].vol, bid[1].price, bid[1].vol, …
+      out = [ask[0].price, ask[0].vol, …, ask[9].price, ask[9].vol,
+             bid[0].price, bid[0].vol, …, bid[9].price, bid[9].vol]
+
+    For level L (0-based):
+      raw[4L + 0] = P_ask  → out[2L]        (ask[L].price)
+      raw[4L + 1] = V_ask  → out[2L + 1]    (ask[L].vol)
+      raw[4L + 2] = P_bid  → out[20 + 2L]   (bid[L].price)
+      raw[4L + 3] = V_bid  → out[20 + 2L + 1] (bid[L].vol)
     """
-    ask_px  = row[0:10]
-    ask_vol = row[10:20]
-    bid_px  = row[20:30]
-    bid_vol = row[30:40]
-
     interleaved = np.empty(LOB_COLS, dtype=np.float64)
-    for i in range(10):
-        interleaved[2 * i]     = ask_px[i]
-        interleaved[2 * i + 1] = ask_vol[i]
-    for i in range(10):
-        interleaved[20 + 2 * i]     = bid_px[i]
-        interleaved[20 + 2 * i + 1] = bid_vol[i]
+    for L in range(10):
+        interleaved[2 * L]          = row[4 * L + 0]   # ask price
+        interleaved[2 * L + 1]      = row[4 * L + 1]   # ask volume
+        interleaved[20 + 2 * L]     = row[4 * L + 2]   # bid price
+        interleaved[20 + 2 * L + 1] = row[4 * L + 3]   # bid volume
 
     return interleaved
 
@@ -133,12 +143,13 @@ def write_binary(data: np.ndarray, out_path: Path) -> int:
 def print_stats(data: np.ndarray) -> None:
     """Print basic statistics for quick sanity checking."""
     lob = data[:, :LOB_COLS]
-    labels = (
-        [f"ask_px_{i+1}" for i in range(10)]
-        + [f"ask_vol_{i+1}" for i in range(10)]
-        + [f"bid_px_{i+1}" for i in range(10)]
-        + [f"bid_vol_{i+1}" for i in range(10)]
-    )
+    # Raw columns are per-level INTERLEAVED: [P_ask, V_ask, P_bid, V_bid] × 10.
+    labels = []
+    for L in range(10):
+        labels += [
+            f"ask_px_{L+1}", f"ask_vol_{L+1}",
+            f"bid_px_{L+1}", f"bid_vol_{L+1}",
+        ]
     print(f"\n{'Column':<14} {'Min':>12} {'Max':>12} {'Mean':>12} {'Std':>12}")
     print("─" * 64)
     for j, label in enumerate(labels):
@@ -148,8 +159,9 @@ def print_stats(data: np.ndarray) -> None:
             f"{col.mean():>12.4f} {col.std():>12.4f}"
         )
 
-    mid = (lob[:, 0] + lob[:, 20]) / 2.0
-    spread = lob[:, 0] - lob[:, 20]
+    # Best ask = raw col 0 (P_ask level 1), best bid = raw col 2 (P_bid level 1).
+    mid = (lob[:, 0] + lob[:, 2]) / 2.0
+    spread = lob[:, 0] - lob[:, 2]
     print(f"\n{'Mid-Price':<14} {mid.min():>12.4f} {mid.max():>12.4f} "
           f"{mid.mean():>12.4f} {mid.std():>12.4f}")
     print(f"{'Spread':<14} {spread.min():>12.4f} {spread.max():>12.4f} "

@@ -312,18 +312,19 @@
 <section id="predict">
   <div class="wrap">
     <div class="sec-head">
-      <div class="eyebrow">02 · The hypothesis</div>
-      <h2>If the tilt is information, the mid should follow it</h2>
+      <div class="eyebrow">02 · The hypothesis, tested honestly</div>
+      <h2>Does the raw tilt predict the mid? On its own — no.</h2>
       <p>The mechanism above is just a definition — it proves nothing on its own. The testable
         claim: when the micro-price leans up at tick <span class="mono">t</span>, the mid-price
-        should tend to rise over the next few ticks. So we measured it on real FI-2010 data.
-        The result is real, and it is <i>not</i> a fairy tale.</p>
+        should tend to rise. We measured it on real FI-2010 data <i>after fixing a
+        column-mapping bug</i> (see below). The verdict is deflating and correct: the naive
+        <span class="mono">micro − mid</span> tilt does <b>not</b> beat a coin-flip.</p>
     </div>
     <div class="stats">
-      <div class="stat acc panel"><div class="n num" id="st-nexttick">52.2%</div><div class="l">tilt predicts next-tick direction (vs 50% coin-flip)</div></div>
-      <div class="stat good panel"><div class="n num" id="st-best">57.0%</div><div class="l">hit-rate at <i>moderate</i> tilt — the signal's sweet spot</div></div>
-      <div class="stat bad panel"><div class="n num" id="st-worst">41.7%</div><div class="l">hit-rate at <i>extreme</i> tilt — it reverses (bid-ask bounce)</div></div>
-      <div class="stat panel"><div class="n num acc" id="st-decay" style="color:var(--muted)">~50</div><div class="l">ticks until the edge decays to a coin-flip</div></div>
+      <div class="stat bad panel"><div class="n num" id="st-nexttick">44.3%</div><div class="l">tilt "predicts" next-tick direction — <i>below</i> 50% coin-flip</div></div>
+      <div class="stat panel"><div class="n num" id="st-best">48.8%</div><div class="l">best-decile hit-rate — still under 50%</div></div>
+      <div class="stat bad panel"><div class="n num" id="st-worst">35.9%</div><div class="l">worst-decile hit-rate — extreme tilt mean-reverts</div></div>
+      <div class="stat panel"><div class="n num acc" id="st-decay" style="color:var(--muted)">~1</div><div class="l">ticks until the (already tiny) edge is gone</div></div>
     </div>
   </div>
 </section>
@@ -334,23 +335,62 @@
     <div class="sec-head">
       <div class="eyebrow">03 · What the data actually says</div>
       <h2>Real FI-2010 — measured, not asserted</h2>
-      <p>Signal = <span class="mono">micro − mid</span> at tick <span class="mono">t</span>.
-        Outcome = sign of the mid-price change over the next <span class="mono">k</span> ticks.
-        Hit-rate is the share of ticks where the sign matched. 50% is a coin flip.</p>
+      <p><b>Corrected loader.</b> The FI-2010 LOB columns are per-level <i>interleaved</i>
+        (<span class="mono">[P_ask, V_ask, P_bid, V_bid]</span>), not block-laid-out. An
+        earlier version of this pipeline mapped them wrong, which inflated an apparent
+        "52% edge" on scrambled columns. On the corrected data the single
+        <span class="mono">micro − mid</span> tilt shows <b>no standalone edge</b> — but the
+        full 144-feature benchmark below is where the real, defensible result lives.</p>
+    </div>
+
+    <!-- Real benchmark: 144-feature tabular models vs published DeepLOB -->
+    <div class="callout" style="margin:0 0 22px;border-color:var(--accent)">
+      <h3>The headline benchmark — LightGBM vs DeepLOB (with 95% CIs)</h3>
+      <p>3-class mid-direction on FI-2010 (Zscore, 362,400 ticks). 5-fold anchored
+        <b>walk-forward</b> with a 100-event embargo. Metric = <b>macro-F1</b>; brackets are
+        <b>stationary-bootstrap 95% CIs</b> (Politis–Romano). Horizons are true
+        <b>event counts</b> {10, 20, 30, 50, 100}. DeepLOB numbers are published
+        (Zhang–Zohren–Roberts 2019), not re-trained here.</p>
+      <div style="overflow-x:auto">
+      <table class="bench" style="width:100%;border-collapse:collapse;font-size:14px;margin-top:10px">
+        <thead>
+          <tr style="text-align:right;color:var(--muted)">
+            <th style="text-align:left;padding:6px 10px">Horizon (events)</th>
+            <th style="padding:6px 10px">LogReg F1</th>
+            <th style="padding:6px 10px">LightGBM F1 (95% CI)</th>
+            <th style="padding:6px 10px">DeepLOB F1 (published)</th>
+          </tr>
+        </thead>
+        <tbody class="mono">
+          <tr style="text-align:right"><td style="text-align:left;padding:6px 10px">10</td><td style="padding:6px 10px">0.361</td><td style="padding:6px 10px">0.500 [0.498, 0.503]</td><td style="padding:6px 10px">0.834</td></tr>
+          <tr style="text-align:right;background:rgba(88,166,255,.08)"><td style="text-align:left;padding:6px 10px"><b>20</b></td><td style="padding:6px 10px">0.430</td><td style="padding:6px 10px"><b>0.640 [0.638, 0.642]</b></td><td style="padding:6px 10px"><b>0.728</b></td></tr>
+          <tr style="text-align:right"><td style="text-align:left;padding:6px 10px">30</td><td style="padding:6px 10px">0.445</td><td style="padding:6px 10px">0.601 [0.598, 0.604]</td><td style="padding:6px 10px">—</td></tr>
+          <tr style="text-align:right"><td style="text-align:left;padding:6px 10px">50</td><td style="padding:6px 10px">0.428</td><td style="padding:6px 10px">0.548 [0.544, 0.552]</td><td style="padding:6px 10px">0.804</td></tr>
+          <tr style="text-align:right"><td style="text-align:left;padding:6px 10px">100</td><td style="padding:6px 10px">0.356</td><td style="padding:6px 10px">0.457 [0.452, 0.463]</td><td style="padding:6px 10px">0.766</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p style="margin-top:10px">At the 20-event horizon the interpretable 144-feature
+        LightGBM reaches <b>macro-F1 0.640</b> — comfortably above classical hand-feature
+        baselines (BoF ≈ 0.36, MLP ≈ 0.51) and about <b>0.09 below</b> the deep-net SOTA
+        (0.728). At that horizon its <i>accuracy</i> (0.729) nearly matches DeepLOB's (0.749).
+        Framing: <i>match the ballpark with a simpler, auditable model — not beat it.</i>
+        Full method + limitations: <code>reports/fi2010_benchmark.md</code>.</p>
     </div>
 
     <div class="two">
       <figure class="panel chartcard" style="margin:0">
-        <h3>Edge decays with horizon</h3>
-        <div class="cap">A short-horizon effect: strongest at the next tick, gone within ~30.</div>
+        <h3>The naive tilt sits below coin-flip</h3>
+        <div class="cap">On corrected data the <span class="mono">micro − mid</span> hit-rate
+          hovers in the mid-40s across every horizon — it never clears 50%. No standalone edge.</div>
         <canvas id="chart-h" height="260" aria-label="Hit-rate versus forward horizon"></canvas>
         <figcaption>hit-rate vs forward horizon k · 362,400 ticks</figcaption>
       </figure>
 
       <figure class="panel chartcard" style="margin:0">
-        <h3>The signal has a sweet spot</h3>
-        <div class="cap">Binned by tilt strength (deciles). Moderate tilts continue; the
-          most extreme tilt mean-reverts — so bigger is <i>not</i> better.</div>
+        <h3>No decile beats the coin</h3>
+        <div class="cap">Binned by tilt strength (deciles). The strongest tilts actively
+          <i>mean-revert</i> (worst decile ≈ 36%); none of the ten deciles clears 50%.</div>
         <canvas id="chart-d" height="260" aria-label="Hit-rate by tilt-strength decile"></canvas>
         <figcaption>hit-rate by |micro − mid| decile · next-tick</figcaption>
       </figure>
@@ -364,10 +404,12 @@
 
     <div class="callout" style="margin-top:24px">
       <h3>What this is not</h3>
-      <p>This is a feature study, not a trading result. Numbers are <b>in-sample on a single
-        instrument</b>, on the <b>normalized</b> FI-2010 benchmark (which compresses the
-        price grid and understates the raw edge). There is <b>no fill model, no costs, no PnL</b>.
-        A 52–57% directional hit-rate is a real signal, not a strategy.</p>
+      <p>This is a classification benchmark, not a trading result. It is a <b>single
+        instrument</b> on the <b>Zscore-normalized</b> FI-2010 variant (which distorts
+        volume-ratio features — full correctness needs the un-normalized DecPre variant).
+        There is <b>no fill model, no costs, no PnL</b>, and DeepLOB is <b>cited, not
+        re-trained</b>. A 0.64 macro-F1 is a signal-quality statement, not a strategy — and
+        the naive micro-price tilt, on corrected data, has no standalone edge at all.</p>
     </div>
   </div>
 </section>
@@ -652,20 +694,20 @@
 
   // ── Evidence charts ─────────────────────────────────────────────────────
   // Baked fallbacks — overwritten by signal_stats.json when it loads (see boot()).
-  let HORIZ = [[1,52.23],[2,52.22],[5,51.87],[10,51.51],[20,51.00],[50,49.85],[100,49.19]];
-  let DECILE = [49.53,53.20,51.19,52.16,53.41,56.22,57.05,56.84,50.99,41.70];
+  let HORIZ = [[1,44.26],[2,44.42],[5,45.33],[10,46.33],[20,47.28],[50,48.96],[100,49.05]];
+  let DECILE = [47.36,46.14,45.90,46.64,48.21,48.84,42.49,40.12,35.88,41.03];
 
   function drawHoriz() {
     const cv = document.getElementById("chart-h");
     const { ctx, w, h } = fit(cv, 260);
     ctx.clearRect(0, 0, w, h);
     const m = { l: 40, r: 14, t: 14, b: 30 };
-    const yMin = 48, yMax = 53;
+    const yMin = 42, yMax = 52;
     const X = (i) => m.l + i / (HORIZ.length - 1) * (w - m.l - m.r);
     const Y = (v) => m.t + (yMax - v) / (yMax - yMin) * (h - m.t - m.b);
     // gridlines + y labels
     ctx.font = "10px " + css("--font-mono"); ctx.fillStyle = css("--faint");
-    for (let v = 48; v <= 53; v++) {
+    for (let v = 42; v <= 52; v += 2) {
       const y = Y(v); ctx.strokeStyle = css("--line"); ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(m.l, y); ctx.lineTo(w - m.r, y); ctx.stroke();
       ctx.textAlign = "right"; ctx.fillText(v + "%", m.l - 6, y + 3);
@@ -695,11 +737,11 @@
     const { ctx, w, h } = fit(cv, 260);
     ctx.clearRect(0, 0, w, h);
     const m = { l: 40, r: 14, t: 14, b: 34 };
-    const yMin = 40, yMax = 58;
+    const yMin = 34, yMax = 52;
     const bw = (w - m.l - m.r) / DECILE.length;
     const Y = (v) => m.t + (yMax - v) / (yMax - yMin) * (h - m.t - m.b);
     ctx.font = "10px " + css("--font-mono");
-    for (let v = 40; v <= 58; v += 6) {
+    for (let v = 34; v <= 52; v += 6) {
       const y = Y(v); ctx.strokeStyle = css("--line"); ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(m.l, y); ctx.lineTo(w - m.r, y); ctx.stroke();
       ctx.fillStyle = css("--faint"); ctx.textAlign = "right"; ctx.fillText(v + "%", m.l - 6, y + 3);
@@ -708,10 +750,10 @@
       const x = m.l + i * bw + 3, y = Y(v), y0 = Y(50);
       const up = v >= 50;
       ctx.fillStyle = up ? css("--bid") : css("--ask");
-      ctx.globalAlpha = (i === 6 || i === 9) ? 1 : 0.55;
+      ctx.globalAlpha = (i === 5 || i === 8) ? 1 : 0.55;
       ctx.fillRect(x, Math.min(y, y0), bw - 6, Math.abs(y - y0));
       ctx.globalAlpha = 1;
-      if (i === 6 || i === 9) {
+      if (i === 5 || i === 8) {
         ctx.fillStyle = css("--ink"); ctx.font = "600 10px " + css("--font-mono"); ctx.textAlign = "center";
         ctx.fillText(v.toFixed(0) + "%", x + (bw - 6) / 2, y - 6);
       }
